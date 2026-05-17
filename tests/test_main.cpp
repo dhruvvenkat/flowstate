@@ -28,6 +28,7 @@
 #include "syntax/markdown_highlighter.h"
 #include "syntax/python_highlighter.h"
 #include "syntax/rust_highlighter.h"
+#include "syntax/theme.h"
 
 namespace {
 
@@ -1456,9 +1457,9 @@ void TestInlineAiExplainRendersInFileView() {
            "inline AI explain should render the response text inline");
     Expect(rendered.find("├") != std::string::npos && rendered.find("> ") != std::string::npos,
            "inline AI explain should render a separated follow-up input area");
-    Expect(rendered.find("Enter sends follow-up.") != std::string::npos,
-           "inline AI explain should show the follow-up input hint");
-    Expect(screen.InlineAiRowCount(state, screen.ContentColumns(state, 80)) >= 6,
+    Expect(rendered.find("Enter sends follow-up.") == std::string::npos,
+           "inline AI explain should keep the input row empty except for the prompt");
+    Expect(screen.InlineAiRowCount(state, screen.ContentColumns(state, 80)) >= 5,
            "inline AI explain should contribute virtual rows to the file view");
 }
 
@@ -1484,6 +1485,30 @@ void TestInlineAiExplainBoldsUserMessages() {
            "inline AI explain should bold user-sent messages");
     Expect(rendered.find("\x1b[1mAI: This is the original explanation.") == std::string::npos,
            "inline AI explain should not bold AI response lines");
+}
+
+void TestInlineAiExplainHighlightsFencedCode() {
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.cpp");
+    buffer.setText("int main() {\n    return 0;\n}", false);
+
+    flowstate::EditorState state(std::move(buffer));
+    state.setInlineAiSession(flowstate::InlineAiSession{
+        .anchor_row = 0,
+        .title = "AI Explain",
+        .provider_name = "CODEX",
+        .state_label = "COMPLETE",
+        .text = "Use this:\n```cpp\nint main() {\n    return 0;\n}\n```",
+    });
+
+    flowstate::Screen screen;
+    const std::string rendered = screen.Render(state, {}, 12, 80);
+
+    Expect(rendered.find("```cpp") == std::string::npos && rendered.find("```") == std::string::npos,
+           "inline AI explain should consume markdown code fence markers");
+    Expect(rendered.find(std::string(flowstate::ColorCodeForToken(flowstate::SyntaxTokenKind::Type)) + "int") !=
+               std::string::npos,
+           "inline AI explain should syntax-highlight fenced code using the fence language");
 }
 
 void TestInlineAiExplainPanelIsScrollable() {
@@ -1518,7 +1543,7 @@ void TestInlineAiExplainPanelIsScrollable() {
            "inline AI explain should keep the full wrapped body available");
     Expect(screen.InlineAiVisibleBodyRowCount(state, content_cols) == 12,
            "inline AI explain should cap the visible body rows");
-    Expect(screen.InlineAiRowCount(state, content_cols) == 17,
+    Expect(screen.InlineAiRowCount(state, content_cols) == 16,
            "inline AI explain virtual row count should include the capped body, input, and borders");
 
     const std::string top_rendered = screen.Render(state, {}, 18, 80);
@@ -1977,6 +2002,7 @@ int main() {
         TestAiScratchBoldsUserMessages();
         TestInlineAiExplainRendersInFileView();
         TestInlineAiExplainBoldsUserMessages();
+        TestInlineAiExplainHighlightsFencedCode();
         TestInlineAiExplainPanelIsScrollable();
         TestInlineAiExplainFooterShowsCodexUsageBars();
         TestAiScratchDiffHunksUseFileSyntaxHighlighting();

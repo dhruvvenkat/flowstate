@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
@@ -30,7 +31,7 @@ constexpr std::string_view kDiagnosticBackground = "\x1b[48;5;52m";
 constexpr std::string_view kSelectionBackground = "\x1b[48;5;238m";
 constexpr auto kGitStatusRefreshInterval = std::chrono::milliseconds(750);
 constexpr size_t kInlineAiMaxBodyRows = 12;
-constexpr size_t kInlineAiInputRows = 2;
+constexpr size_t kInlineAiInputRows = 1;
 
 enum class AiDiffPhase {
     Outside,
@@ -64,7 +65,18 @@ struct FileRenderState {
 struct InlineAiBodyLine {
     std::string text;
     bool user_message = false;
+    bool code = false;
+    LanguageId code_language = LanguageId::PlainText;
+    SyntaxLineState code_state;
+    size_t code_col_offset = 0;
 };
+
+std::string RenderHighlightedCode(std::string_view code,
+                                  size_t col_offset,
+                                  size_t cols,
+                                  const ISyntaxHighlighter& highlighter,
+                                  SyntaxLineState line_state,
+                                  SyntaxLineState* next_line_state);
 
 std::string EscapeLine(const std::string& text) {
     std::string output;
@@ -100,6 +112,80 @@ bool StartsWith(std::string_view text, std::string_view prefix) {
 
 bool IsUserAiMessageLine(std::string_view line) {
     return StartsWith(line, "You: ");
+}
+
+std::string_view TrimAsciiWhitespace(std::string_view text) {
+    size_t start = 0;
+    while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])) != 0) {
+        ++start;
+    }
+    size_t end = text.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
+        --end;
+    }
+    return text.substr(start, end - start);
+}
+
+std::string LowerAscii(std::string_view text) {
+    std::string lowered;
+    lowered.reserve(text.size());
+    for (char ch : text) {
+        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    return lowered;
+}
+
+std::string CodeFenceLanguageToken(std::string_view info) {
+    info = TrimAsciiWhitespace(info);
+    size_t end = 0;
+    while (end < info.size() && std::isspace(static_cast<unsigned char>(info[end])) == 0) {
+        ++end;
+    }
+    return LowerAscii(info.substr(0, end));
+}
+
+LanguageId LanguageIdForCodeFenceInfo(std::string_view info) {
+    const std::string language = CodeFenceLanguageToken(info);
+    if (language == "c") {
+        return LanguageId::C;
+    }
+    if (language == "h" || language == "cc" || language == "cpp" || language == "cxx" ||
+        language == "c++" || language == "hpp") {
+        return LanguageId::Cpp;
+    }
+    if (language == "rs" || language == "rust") {
+        return LanguageId::Rust;
+    }
+    if (language == "py" || language == "python") {
+        return LanguageId::Python;
+    }
+    if (language == "js" || language == "jsx" || language == "javascript") {
+        return LanguageId::JavaScript;
+    }
+    if (language == "ts" || language == "tsx" || language == "typescript") {
+        return LanguageId::TypeScript;
+    }
+    if (language == "java") {
+        return LanguageId::Java;
+    }
+    if (language == "go" || language == "golang") {
+        return LanguageId::Go;
+    }
+    if (language == "md" || language == "markdown") {
+        return LanguageId::Markdown;
+    }
+    return LanguageId::PlainText;
+}
+
+bool ParseCodeFence(std::string_view line, std::string_view* info) {
+    line = TrimAsciiWhitespace(line);
+    if (!StartsWith(line, "```")) {
+        return false;
+    }
+    if (info != nullptr) {
+        *info = line.substr(3);
+    }
+    return true;
 }
 
 std::string RenderVisibleText(std::string_view line, size_t col_offset, size_t cols) {
@@ -419,10 +505,58 @@ std::vector<std::string> WrapPlainLine(std::string_view line, size_t width) {
     return wrapped;
 }
 
+void AppendInlineCodeBodyLine(std::vector<InlineAiBodyLine>* body,
+                              std::string_view line,
+                              size_t width,
+                              LanguageId language,
+                              SyntaxLineState line_state) {
+    if (width == 0 || line.empty()) {
+        body->push_back({.text = std::string(line),
+                         .code = true,
+                         .code_language = language,
+                         .code_state = line_state,
+                         .code_col_offset = 0});
+        return;
+    }
+
+    for (size_t start = 0; start < line.size(); start += width) {
+        body->push_back({.text = std::string(line),
+                         .code = true,
+                         .code_language = language,
+                         .code_state = line_state,
+                         .code_col_offset = start});
+    }
+}
+
 std::vector<InlineAiBodyLine> WrappedInlineAiBody(const InlineAiSession& session, size_t content_cols) {
     const size_t body_width = InlineAiBodyWidth(content_cols);
     std::vector<InlineAiBodyLine> body;
+    bool in_code_block = false;
+    LanguageId code_language = LanguageId::PlainText;
+    const ISyntaxHighlighter* code_highlighter = &HighlighterForLanguage(code_language);
+    SyntaxLineState code_state = code_highlighter->InitialState();
+
     for (const std::string& line : SplitPlainLines(session.text)) {
+        std::string_view fence_info;
+        if (ParseCodeFence(line, &fence_info)) {
+            if (in_code_block) {
+                in_code_block = false;
+                continue;
+            }
+
+            code_language = LanguageIdForCodeFenceInfo(fence_info);
+            code_highlighter = &HighlighterForLanguage(code_language);
+            code_state = code_highlighter->InitialState();
+            in_code_block = true;
+            continue;
+        }
+
+        if (in_code_block) {
+            AppendInlineCodeBodyLine(&body, line, body_width, code_language, code_state);
+            code_state = code_highlighter->HighlightLine(line, code_state, nullptr);
+            continue;
+        }
+
         const bool user_message = IsUserAiMessageLine(line);
         std::vector<std::string> wrapped = WrapPlainLine(line, body_width);
         for (std::string& wrapped_line : wrapped) {
@@ -475,6 +609,37 @@ std::string InlineAiGutter(const Buffer& buffer) {
     return std::string(LineNumberDigits(buffer), ' ') + std::string(kGutterSeparator) + ' ';
 }
 
+size_t InlineCodeSliceWidth(std::string_view line, size_t col_offset, size_t width) {
+    if (width == 0 || col_offset >= line.size()) {
+        return 0;
+    }
+    return std::min(width, line.size() - col_offset);
+}
+
+std::string PadRenderedInlineText(std::string rendered, size_t visible_width, size_t target_width) {
+    if (visible_width < target_width) {
+        rendered.append(target_width - visible_width, ' ');
+    }
+    return rendered;
+}
+
+std::string RenderInlineAiBodyLine(const InlineAiBodyLine& line, size_t width) {
+    if (line.code) {
+        const ISyntaxHighlighter& highlighter = HighlighterForLanguage(line.code_language);
+        std::string rendered =
+            RenderHighlightedCode(line.text, line.code_col_offset, width, highlighter, line.code_state, nullptr);
+        return PadRenderedInlineText(std::move(rendered),
+                                     InlineCodeSliceWidth(line.text, line.code_col_offset, width),
+                                     width);
+    }
+
+    std::string rendered = FitInlineText(line.text, width);
+    if (line.user_message) {
+        rendered = std::string("\x1b[1m") + rendered + "\x1b[22m";
+    }
+    return rendered;
+}
+
 std::vector<std::string> RenderInlineAiRows(const InlineAiSession& session,
                                             const std::optional<RateLimitSnapshotInfo>& rate_limits,
                                             size_t content_cols) {
@@ -510,13 +675,9 @@ std::vector<std::string> RenderInlineAiRows(const InlineAiSession& session,
 
     for (size_t index = 0; index < visible_body_rows; ++index) {
         const InlineAiBodyLine& body_line = body[scroll_row + index];
-        std::string rendered_line = FitInlineText(body_line.text, InlineAiBodyWidth(content_cols));
-        if (body_line.user_message) {
-            rendered_line = std::string("\x1b[1m") + rendered_line + "\x1b[22m";
-        }
         rows.push_back(std::string(kInlineAiBorderColor) + "│ " + std::string(ResetColorCode()) +
-                       rendered_line + std::string(kInlineAiBorderColor) + " │" +
-                       std::string(ResetColorCode()));
+                       RenderInlineAiBodyLine(body_line, InlineAiBodyWidth(content_cols)) +
+                       std::string(kInlineAiBorderColor) + " │" + std::string(ResetColorCode()));
     }
 
     rows.push_back(std::string(kInlineAiBorderColor) + "├" + FitInlineText("", inner_width, "─") + "┤" +
@@ -528,11 +689,6 @@ std::vector<std::string> RenderInlineAiRows(const InlineAiSession& session,
         input_width == 0 ? "" : session.input_text.substr(input_start, input_width);
     rows.push_back(std::string(kInlineAiBorderColor) + "│ " + std::string(ResetColorCode()) +
                    FitInlineText("> " + visible_input, InlineAiBodyWidth(content_cols)) +
-                   std::string(kInlineAiBorderColor) + " │" + std::string(ResetColorCode()));
-
-    const std::string input_hint = session.waiting ? "Waiting for AI response." : "Enter sends follow-up.";
-    rows.push_back(std::string(kInlineAiBorderColor) + "│ " + std::string(ResetColorCode()) +
-                   FitInlineText(input_hint, InlineAiBodyWidth(content_cols)) +
                    std::string(kInlineAiBorderColor) + " │" + std::string(ResetColorCode()));
 
     std::string footer_text;

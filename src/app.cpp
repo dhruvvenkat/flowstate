@@ -2065,7 +2065,7 @@ void EditorApp::HandleAiResponse(const AiResponse& response) {
         state_.setAiRequestState(AiRequestStateLabel(AiRequestState::Complete));
         if (!ai_request_backgrounded_ && state_.inlineAiSession().has_value()) {
             ShowInlineAiText(inline_text, AiRequestStateLabel(AiRequestState::Complete), false, false);
-            state_.setStatus("AI explanation complete. Type a follow-up in the box, Enter sends it.", 60);
+            state_.setStatus("AI explanation complete. Follow-up prompt is ready.", 60);
         } else {
             state_.setStatus("AI explanation complete. Press Alt+E to reopen AI scratch.", 60);
         }
