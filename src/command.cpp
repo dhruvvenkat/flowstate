@@ -61,6 +61,12 @@ Command ParseCommand(std::string_view input) {
         }
         return {.type = CommandType::Goto, .argument = tokens[1]};
     }
+    if (tokens[0] == "enable-ai") {
+        if (tokens.size() < 2 || (tokens[1] != "openai" && tokens[1] != "codex")) {
+            return {.error = "Usage: :enable-ai <openai|codex>"};
+        }
+        return {.type = CommandType::EnableAi, .argument = tokens[1]};
+    }
     if (tokens[0] == "ai" && tokens.size() >= 2) {
         if (tokens[1] == "explain") {
             return {.type = CommandType::AiExplain};

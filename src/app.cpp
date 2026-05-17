@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <sstream>
 
+#include "ai/codex_client.h"
+#include "ai/openai_client.h"
 #include "command.h"
 #include "cursor.h"
 #include "diff.h"
@@ -979,6 +981,8 @@ bool EditorApp::ExecuteCommand(const Command& command) {
             return FindText(command.argument);
         case CommandType::Goto:
             return GotoLine(command.argument);
+        case CommandType::EnableAi:
+            return EnableAiProvider(command.argument);
         case CommandType::AiExplain:
             RunAiRequest(AiRequestKind::Explain, "Explain this code.");
             return true;
@@ -1017,6 +1021,36 @@ bool EditorApp::OpenFile(const std::string& path) {
     diagnostics_auto_suppressed_ = false;
     completion_auto_suppressed_ = false;
     state_.setStatus("Opened " + path + ".");
+    return true;
+}
+
+bool EditorApp::EnableAiProvider(const std::string& provider) {
+    if (active_ai_request_.has_value() || ai_client_->HasActiveRequest()) {
+        state_.setStatus("Wait for the current AI request to finish before switching providers.", 60);
+        return false;
+    }
+
+    std::unique_ptr<IAiClient> next_client;
+    std::string provider_name;
+    if (provider == "openai") {
+        next_client = std::make_unique<OpenAiClient>();
+        provider_name = "OPENAI";
+    } else if (provider == "codex") {
+        next_client = std::make_unique<CodexClient>();
+        provider_name = "CODEX";
+    } else {
+        state_.setStatus("Usage: :enable-ai <openai|codex>");
+        return false;
+    }
+
+    ai_client_->Shutdown();
+    ai_client_ = std::move(next_client);
+    ai_request_backgrounded_ = false;
+    active_ai_request_.reset();
+    state_.clearAiRequestState();
+    state_.setAiRateLimits(std::nullopt);
+    state_.setAiProviderName(provider_name);
+    state_.setStatus("AI enabled via " + provider_name + ".");
     return true;
 }
 
@@ -1517,7 +1551,7 @@ AiRequest EditorApp::BuildAiRequest(AiRequestKind kind, const std::string& instr
 
 void EditorApp::RunAiRequest(AiRequestKind kind, std::string instruction) {
     if (state_.aiProviderName() == "OFF") {
-        state_.setStatus("AI is disabled for this session. Start with --ai openai or --ai codex to enable it.", 60);
+        state_.setStatus("AI is disabled. Use :enable-ai openai or :enable-ai codex to enable it.", 60);
         return;
     }
     if (active_ai_request_.has_value() || ai_client_->HasActiveRequest()) {

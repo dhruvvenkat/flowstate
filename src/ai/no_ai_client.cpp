@@ -4,7 +4,7 @@ namespace flowstate {
 
 bool NoAiClient::StartRequest(const AiRequest&, std::string* error) {
     if (error != nullptr) {
-        *error = "AI is disabled for this session. Start with --ai openai or --ai codex to enable it.";
+        *error = "AI is disabled. Use :enable-ai openai or :enable-ai codex to enable it.";
     }
     return false;
 }

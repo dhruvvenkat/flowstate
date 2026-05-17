@@ -117,6 +117,7 @@ Press `Alt+C` to open command mode, type a command, then press `Enter`.
 | `:build` | Run the configured build command |
 | `:find <text>` | Find text in the current file, wrapping from the cursor |
 | `:goto <line>` | Jump to a 1-based line number |
+| `:enable-ai <openai|codex>` | Enable an AI provider for the current session |
 | `:ai explain` | Explain the current line or selection |
 | `:ai fix` | Generate a fix patch |
 | `:ai refactor` | Generate a refactor patch |
@@ -155,8 +156,9 @@ Build output opens in its own buffer after `Ctrl+T` or `:build`.
 
 ## AI Provider Setup
 
-AI is disabled by default. Use `--ai openai`, `--ai codex`, or `FLOWSTATE_AI_MODE` to enable
-AI for a session. Use `--no-ai` to force AI off even when you normally enable a provider.
+AI is disabled by default. Use `--ai openai`, `--ai codex`, `FLOWSTATE_AI_MODE`, or
+`:enable-ai <openai|codex>` to enable AI for a session. Use `--no-ai` to start with AI
+off even when you normally enable a provider.
 
 ### OpenAI
 

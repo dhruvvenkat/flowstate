@@ -13,6 +13,7 @@ enum class CommandType {
     Build,
     Find,
     Goto,
+    EnableAi,
     AiExplain,
     AiFix,
     AiRefactor,

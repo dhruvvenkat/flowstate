@@ -342,6 +342,9 @@ void TestCommandParsing() {
     const flowstate::Command accept_all = flowstate::ParseCommand(":patch accept-all");
     const flowstate::Command find = flowstate::ParseCommand(":find totalBefore");
     const flowstate::Command goto_line = flowstate::ParseCommand(":goto 42");
+    const flowstate::Command enable_ai = flowstate::ParseCommand(":enable-ai codex");
+    const flowstate::Command missing_ai_provider = flowstate::ParseCommand(":enable-ai");
+    const flowstate::Command invalid_ai_provider = flowstate::ParseCommand(":enable-ai nope");
     const flowstate::Command invalid = flowstate::ParseCommand(":patch nope");
 
     Expect(open.type == flowstate::CommandType::Open, "open command should parse");
@@ -351,6 +354,14 @@ void TestCommandParsing() {
     Expect(find.argument == "totalBefore", "find command should preserve the query");
     Expect(goto_line.type == flowstate::CommandType::Goto, "goto command should parse");
     Expect(goto_line.argument == "42", "goto command should preserve the target line");
+    Expect(enable_ai.type == flowstate::CommandType::EnableAi, "enable-ai command should parse");
+    Expect(enable_ai.argument == "codex", "enable-ai should preserve the requested provider");
+    Expect(missing_ai_provider.type == flowstate::CommandType::Invalid &&
+               missing_ai_provider.error == "Usage: :enable-ai <openai|codex>",
+           "enable-ai should require a provider");
+    Expect(invalid_ai_provider.type == flowstate::CommandType::Invalid &&
+               invalid_ai_provider.error == "Usage: :enable-ai <openai|codex>",
+           "enable-ai should reject unsupported providers");
     Expect(invalid.type == flowstate::CommandType::Invalid, "invalid command should be rejected");
 }
 

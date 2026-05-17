@@ -44,6 +44,7 @@ class EditorApp {
     void UpdateSelectionHead();
     bool ExecuteCommand(const Command& command);
     bool OpenFile(const std::string& path);
+    bool EnableAiProvider(const std::string& provider);
     bool FindText(const std::string& query);
     bool GotoLine(const std::string& line_text);
     void StartCommandPrompt();
