@@ -56,9 +56,58 @@ bool ModifierHasShift(std::string_view modifier) {
     return value > 1 && ((value - 1) & 1) != 0;
 }
 
+bool ConsumeUnsigned(std::string_view text, size_t* index, int* value) {
+    if (index == nullptr || value == nullptr || *index >= text.size() || text[*index] < '0' ||
+        text[*index] > '9') {
+        return false;
+    }
+
+    int parsed = 0;
+    while (*index < text.size() && text[*index] >= '0' && text[*index] <= '9') {
+        parsed = parsed * 10 + (text[*index] - '0');
+        ++(*index);
+    }
+    *value = parsed;
+    return true;
+}
+
 bool LooksLikeModifiedNavigationKey(char final_byte) {
     return final_byte == 'A' || final_byte == 'B' || final_byte == 'C' || final_byte == 'D' ||
            final_byte == 'H' || final_byte == 'F';
+}
+
+KeyPress MouseControlSequenceKey(std::string_view sequence) {
+    if (sequence.size() < 2 || sequence.front() != '<') {
+        return {.type = KeyType::Unknown};
+    }
+
+    const char final_byte = sequence.back();
+    if (final_byte != 'M' && final_byte != 'm') {
+        return {.type = KeyType::Unknown};
+    }
+
+    size_t index = 1;
+    int button = 0;
+    int col = 0;
+    int row = 0;
+    if (!ConsumeUnsigned(sequence, &index, &button) || index >= sequence.size() || sequence[index++] != ';' ||
+        !ConsumeUnsigned(sequence, &index, &col) || index >= sequence.size() || sequence[index++] != ';' ||
+        !ConsumeUnsigned(sequence, &index, &row) || index + 1 != sequence.size()) {
+        return {.type = KeyType::Unknown};
+    }
+
+    if (final_byte == 'm') {
+        return {.type = KeyType::Unknown};
+    }
+
+    switch (button) {
+        case 64:
+            return {.type = KeyType::MouseWheelUp};
+        case 65:
+            return {.type = KeyType::MouseWheelDown};
+        default:
+            return {.type = KeyType::Unknown};
+    }
 }
 
 KeyPress ControlSequenceKey(std::string_view sequence) {
@@ -67,6 +116,10 @@ KeyPress ControlSequenceKey(std::string_view sequence) {
     }
 
     const char final_byte = sequence.back();
+    if (sequence.front() == '<') {
+        return MouseControlSequenceKey(sequence);
+    }
+
     if (sequence.size() == 1) {
         switch (final_byte) {
             case 'A':
@@ -122,6 +175,7 @@ KeyPress ControlSequenceKey(std::string_view sequence) {
 
 void RestoreTerminalMode() {
     if (g_raw_mode_enabled && g_original_mode != nullptr) {
+        ::write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1000l", 16);
         tcsetattr(STDIN_FILENO, TCSAFLUSH, g_original_mode);
         g_raw_mode_enabled = false;
     }
@@ -190,6 +244,7 @@ bool Terminal::EnableRawMode(std::string* error) {
     raw_mode_enabled_ = true;
     g_original_mode = original_mode_;
     g_raw_mode_enabled = true;
+    ::write(STDOUT_FILENO, "\x1b[?1000h\x1b[?1006h", 16);
     InstallSignalHandlers();
     return true;
 }
@@ -253,13 +308,13 @@ KeyPress Terminal::ReadKey() const {
         }
         if (first == '[') {
             std::string sequence;
-            for (size_t index = 0; index < 8; ++index) {
+            for (size_t index = 0; index < 32; ++index) {
                 char next = '\0';
                 if (!read_optional_byte(&next, 50)) {
                     return {.type = KeyType::Escape};
                 }
                 sequence.push_back(next);
-                if ((next >= 'A' && next <= 'Z') || next == '~') {
+                if (next >= '@' && next <= '~') {
                     break;
                 }
             }

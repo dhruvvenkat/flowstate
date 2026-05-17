@@ -64,6 +64,7 @@ export FLOWSTATE_AI_MODE=codex
 | `Ctrl+Q` | Quit. If the file is dirty, press it twice |
 | `Ctrl+G` | Toggle selection on or off |
 | `Ctrl+/` | Toggle line comments for the selected lines or current line |
+| Mouse wheel | Scroll the active buffer |
 | `Shift+Arrow` | Extend the current selection by character or line |
 | `Shift+Home` / `Shift+End` | Extend the current selection to the start or end of the line |
 | `Tab` | Insert spaces to the next 4-space indentation stop |

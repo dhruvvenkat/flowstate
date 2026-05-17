@@ -32,6 +32,7 @@ class EditorApp {
     void HandleNormalKey(const KeyPress& key);
     void HandleCommandKey(const KeyPress& key);
     void HandleFilePickerKey(const KeyPress& key);
+    bool HandleMouseScroll(const KeyPress& key);
     bool HandleInlineAiKey(const KeyPress& key);
     bool EnterInlineAiBody(size_t cursor_body_row, size_t content_cols);
     bool LeaveInlineAiBody(size_t target_file_row);

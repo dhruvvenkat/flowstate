@@ -23,6 +23,8 @@ enum class KeyType {
     Enter,
     Escape,
     Backspace,
+    MouseWheelUp,
+    MouseWheelDown,
 };
 
 struct KeyPress {

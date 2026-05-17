@@ -21,6 +21,7 @@ namespace {
 
 constexpr size_t kContextLines = 3;
 constexpr size_t kPageMoveDistance = 10;
+constexpr size_t kMouseScrollDistance = 4;
 constexpr std::chrono::milliseconds kAiLoadingTick(120);
 
 std::optional<char> ClosingBracketFor(char ch) {
@@ -250,6 +251,9 @@ int EditorApp::Run() {
         PollAiRequest();
         PollCompletionRequest();
         if (key.type == KeyType::Unknown) {
+            continue;
+        }
+        if (HandleMouseScroll(key)) {
             continue;
         }
         if (command_mode_) {
@@ -556,8 +560,64 @@ void EditorApp::HandleNormalKey(const KeyPress& key) {
             }
             return;
         case KeyType::Unknown:
+        case KeyType::MouseWheelUp:
+        case KeyType::MouseWheelDown:
             return;
     }
+}
+
+bool EditorApp::HandleMouseScroll(const KeyPress& key) {
+    if (key.type != KeyType::MouseWheelUp && key.type != KeyType::MouseWheelDown) {
+        return false;
+    }
+
+    if (file_picker_mode_) {
+        if (!file_picker_matches_.empty()) {
+            if (key.type == KeyType::MouseWheelUp) {
+                file_picker_selected_ =
+                    file_picker_selected_ > kMouseScrollDistance ? file_picker_selected_ - kMouseScrollDistance : 0;
+            } else {
+                file_picker_selected_ =
+                    std::min(file_picker_matches_.size() - 1, file_picker_selected_ + kMouseScrollDistance);
+            }
+            state_.activeViewport().cursor.row = file_picker_selected_ + 1;
+        }
+        return true;
+    }
+
+    Buffer& buffer = state_.activeBuffer();
+    if (buffer.lineCount() == 0) {
+        return true;
+    }
+
+    const auto window_size = terminal_.WindowSize();
+    const size_t content_rows = static_cast<size_t>(std::max(1, window_size.first - 2));
+    Viewport& viewport = state_.activeViewport();
+    const size_t max_row_offset = buffer.lineCount() > content_rows ? buffer.lineCount() - content_rows : 0;
+
+    if (key.type == KeyType::MouseWheelUp) {
+        viewport.row_offset =
+            viewport.row_offset > kMouseScrollDistance ? viewport.row_offset - kMouseScrollDistance : 0;
+    } else {
+        viewport.row_offset = std::min(max_row_offset, viewport.row_offset + kMouseScrollDistance);
+    }
+    viewport.row_offset = std::min(viewport.row_offset, max_row_offset);
+
+    const size_t visible_end =
+        std::min(buffer.lineCount() - 1, viewport.row_offset + content_rows - 1);
+    if (viewport.cursor.row < viewport.row_offset) {
+        viewport.cursor.row = viewport.row_offset;
+    }
+    if (viewport.cursor.row > visible_end) {
+        viewport.cursor.row = visible_end;
+    }
+    CursorController::clamp(viewport.cursor, buffer);
+
+    if (state_.activeView() == ViewKind::PatchPreview && state_.patchSession().has_value()) {
+        PatchSession& session = *state_.patchSession();
+        session.current_hunk = HunkIndexForPreviewRow(session, state_.viewport(ViewKind::PatchPreview).cursor.row);
+    }
+    return true;
 }
 
 bool EditorApp::HandleInlineAiKey(const KeyPress& key) {
