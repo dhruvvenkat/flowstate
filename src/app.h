@@ -27,6 +27,8 @@ class EditorApp {
     int Run();
 
   private:
+    friend class EditorAppTestPeer;
+
     void RefreshScreen();
     void ScrollToCursor(int screen_rows, int screen_cols);
     void HandleNormalKey(const KeyPress& key);

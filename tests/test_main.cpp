@@ -9,6 +9,7 @@
 
 #include "ai/codex_client.h"
 #include "ai/no_ai_client.h"
+#include "app.h"
 #include "build.h"
 #include "buffer.h"
 #include "command.h"
@@ -29,6 +30,19 @@
 #include "syntax/python_highlighter.h"
 #include "syntax/rust_highlighter.h"
 #include "syntax/theme.h"
+
+namespace flowstate {
+
+class EditorAppTestPeer {
+  public:
+    static EditorState& State(EditorApp& app) { return app.state_; }
+
+    static bool HandleInlineAiKey(EditorApp& app, const KeyPress& key) {
+        return app.HandleInlineAiKey(key);
+    }
+};
+
+}  // namespace flowstate
 
 namespace {
 
@@ -1568,6 +1582,85 @@ void TestInlineAiExplainPanelIsScrollable() {
            "focused inline AI rows should rely on the normal terminal cursor instead of inverse blinking");
 }
 
+void TestInlineAiExplainDownAtBottomReturnsToFileWithoutClosing() {
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.cpp");
+    buffer.setText("line 0\nline 1\nline 2\nline 3", false);
+
+    auto ai_client = std::make_unique<flowstate::NoAiClient>();
+    flowstate::EditorApp app(std::move(buffer), std::move(ai_client), "", "NO AI", "c++17");
+    flowstate::EditorState& state = flowstate::EditorAppTestPeer::State(app);
+
+    std::string long_explanation;
+    for (int index = 0; index < 20; ++index) {
+        if (!long_explanation.empty()) {
+            long_explanation.push_back('\n');
+        }
+        long_explanation += "line " + std::to_string(index);
+    }
+
+    state.fileCursor().row = 1;
+    state.setInlineAiSession(flowstate::InlineAiSession{
+        .anchor_row = 1,
+        .title = "AI Explain",
+        .provider_name = "CODEX",
+        .state_label = "COMPLETE",
+        .text = long_explanation,
+    });
+    state.inlineAiSession()->focused = true;
+
+    flowstate::Screen screen;
+    const size_t content_cols = screen.ContentColumns(state, 80);
+    const size_t body_rows = screen.InlineAiBodyRowCount(state, content_cols);
+    const size_t visible_rows = screen.InlineAiVisibleBodyRowCount(state, content_cols);
+    state.inlineAiSession()->scroll_row = body_rows - visible_rows;
+    state.inlineAiSession()->cursor_body_row = body_rows - 1;
+
+    const bool handled = flowstate::EditorAppTestPeer::HandleInlineAiKey(
+        app, flowstate::KeyPress{.type = flowstate::KeyType::ArrowDown});
+
+    Expect(handled, "down at the bottom of inline AI should be handled");
+    Expect(state.inlineAiSession().has_value(),
+           "down at the bottom of inline AI should keep the panel open");
+    Expect(!state.inlineAiSession()->focused,
+           "down at the bottom of inline AI should return focus to the file");
+    Expect(state.fileCursor().row == 2,
+           "down at the bottom of inline AI should move to the next file row after the panel");
+}
+
+void TestInlineAiExplainUpAtTopReturnsToFileWithoutClosing() {
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.cpp");
+    buffer.setText("line 0\nline 1\nline 2\nline 3", false);
+
+    auto ai_client = std::make_unique<flowstate::NoAiClient>();
+    flowstate::EditorApp app(std::move(buffer), std::move(ai_client), "", "NO AI", "c++17");
+    flowstate::EditorState& state = flowstate::EditorAppTestPeer::State(app);
+
+    state.fileCursor().row = 1;
+    state.setInlineAiSession(flowstate::InlineAiSession{
+        .anchor_row = 1,
+        .title = "AI Explain",
+        .provider_name = "CODEX",
+        .state_label = "COMPLETE",
+        .text = "line 0\nline 1\nline 2",
+    });
+    state.inlineAiSession()->focused = true;
+    state.inlineAiSession()->scroll_row = 0;
+    state.inlineAiSession()->cursor_body_row = 0;
+
+    const bool handled = flowstate::EditorAppTestPeer::HandleInlineAiKey(
+        app, flowstate::KeyPress{.type = flowstate::KeyType::ArrowUp});
+
+    Expect(handled, "up at the top of inline AI should be handled");
+    Expect(state.inlineAiSession().has_value(),
+           "up at the top of inline AI should keep the panel open");
+    Expect(!state.inlineAiSession()->focused,
+           "up at the top of inline AI should return focus to the file");
+    Expect(state.fileCursor().row == 1,
+           "up at the top of inline AI should move to the file row before the panel");
+}
+
 flowstate::RateLimitSnapshotInfo TestRateLimits(double five_hour_percent, double weekly_percent) {
     flowstate::RateLimitSnapshotInfo rate_limits;
     rate_limits.available = true;
@@ -2004,6 +2097,8 @@ int main() {
         TestInlineAiExplainBoldsUserMessages();
         TestInlineAiExplainHighlightsFencedCode();
         TestInlineAiExplainPanelIsScrollable();
+        TestInlineAiExplainDownAtBottomReturnsToFileWithoutClosing();
+        TestInlineAiExplainUpAtTopReturnsToFileWithoutClosing();
         TestInlineAiExplainFooterShowsCodexUsageBars();
         TestAiScratchDiffHunksUseFileSyntaxHighlighting();
         TestPatchPreviewAddedLinesUseFileSyntaxHighlighting();

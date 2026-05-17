@@ -1,4 +1,4 @@
-![](/home/dhruv/Pictures/Screenshots/Screenshot%20from%202026-05-17%2014-53-41.png)
+![](assets/flowstate-ascii.png)
 
 # take back control of your code
 

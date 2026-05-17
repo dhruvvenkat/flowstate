@@ -635,9 +635,19 @@ bool EditorApp::HandleInlineAiKey(const KeyPress& key) {
         InlineAiSession& session = *state_.inlineAiSession();
         switch (key.type) {
             case KeyType::ArrowUp:
+                if (session.scroll_row == 0) {
+                    return LeaveInlineAiBody(session.anchor_row);
+                }
                 return ScrollInlineAiBody(-1, content_cols);
-            case KeyType::ArrowDown:
+            case KeyType::ArrowDown: {
+                const size_t visible_rows = screen_.InlineAiVisibleBodyRowCount(state_, content_cols);
+                const size_t max_scroll_row = body_rows > visible_rows ? body_rows - visible_rows : 0;
+                session.scroll_row = std::min(session.scroll_row, max_scroll_row);
+                if (session.scroll_row >= max_scroll_row) {
+                    return LeaveInlineAiBody(session.anchor_row + 1);
+                }
                 return ScrollInlineAiBody(1, content_cols);
+            }
             case KeyType::PageUp:
                 return ScrollInlineAiBody(-static_cast<int>(kPageMoveDistance), content_cols);
             case KeyType::PageDown:
