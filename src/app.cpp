@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cctype>
 #include <filesystem>
+#include <limits>
 #include <sstream>
 
 #include "ai/codex_client.h"
@@ -322,13 +323,8 @@ void EditorApp::ScrollToCursor(int screen_rows, int screen_cols) {
                    if (body_rows == 0) {
                        return false;
                    }
-                   const size_t cursor_body_row = std::min(session.cursor_body_row, body_rows - 1);
                    const size_t visible_rows = screen_.InlineAiVisibleBodyRowCount(state_, content_cols);
-                   const size_t max_scroll_row = body_rows > visible_rows ? body_rows - visible_rows : 0;
-                   const size_t scroll_row = std::min(session.scroll_row, max_scroll_row);
-                   const size_t body_visible_offset =
-                       cursor_body_row >= scroll_row ? cursor_body_row - scroll_row : 0;
-                   size_t extra_rows = 2 + body_visible_offset;
+                   size_t extra_rows = visible_rows + 3;
                    if (git_status.has_value()) {
                        extra_rows +=
                            ExpandedGitRowsBetween(state_, *git_status, viewport.row_offset, viewport.cursor.row);
@@ -636,35 +632,60 @@ bool EditorApp::HandleInlineAiKey(const KeyPress& key) {
     const size_t current_file_row = state_.fileCursor().row;
 
     if (state_.inlineAiSession()->focused) {
+        InlineAiSession& session = *state_.inlineAiSession();
         switch (key.type) {
             case KeyType::ArrowUp:
                 return ScrollInlineAiBody(-1, content_cols);
             case KeyType::ArrowDown:
                 return ScrollInlineAiBody(1, content_cols);
             case KeyType::PageUp:
-                return LeaveInlineAiBody(anchor_row);
+                return ScrollInlineAiBody(-static_cast<int>(kPageMoveDistance), content_cols);
             case KeyType::PageDown:
-                if (anchor_row + 1 >= state_.fileBuffer().lineCount()) {
-                    state_.setStatus("End of file.");
-                    return true;
-                }
-                return LeaveInlineAiBody(anchor_row + 1);
+                return ScrollInlineAiBody(static_cast<int>(kPageMoveDistance), content_cols);
             case KeyType::Home:
-                return SetInlineAiCursorBodyRow(0, content_cols);
+                session.input_cursor_col = 0;
+                return true;
             case KeyType::End:
-                return SetInlineAiCursorBodyRow(body_rows - 1, content_cols);
+                session.input_cursor_col = session.input_text.size();
+                return true;
             case KeyType::Backspace:
+                if (session.input_cursor_col > 0) {
+                    session.input_text.erase(session.input_cursor_col - 1, 1);
+                    --session.input_cursor_col;
+                }
+                return true;
             case KeyType::DeleteKey:
+                if (session.input_cursor_col < session.input_text.size()) {
+                    session.input_text.erase(session.input_cursor_col, 1);
+                }
+                return true;
             case KeyType::Enter:
+                SubmitInlineAiFollowUp();
+                return true;
             case KeyType::Tab:
+                session.input_text.insert(session.input_cursor_col, "    ");
+                session.input_cursor_col += 4;
+                return true;
             case KeyType::Character:
-                state_.setStatus("AI explanation is read-only. Use Up/Down to move through it, Esc closes it.");
+                if (static_cast<unsigned char>(key.ch) >= 32) {
+                    session.input_text.insert(session.input_cursor_col, 1, key.ch);
+                    ++session.input_cursor_col;
+                }
                 return true;
             case KeyType::ArrowLeft:
+                if (session.input_cursor_col > 0) {
+                    --session.input_cursor_col;
+                }
+                return true;
             case KeyType::ArrowRight:
+                if (session.input_cursor_col < session.input_text.size()) {
+                    ++session.input_cursor_col;
+                }
                 return true;
             case KeyType::Escape:
             case KeyType::Unknown:
+            case KeyType::MouseWheelUp:
+            case KeyType::MouseWheelDown:
                 return false;
         }
         return false;
@@ -746,25 +767,17 @@ bool EditorApp::ScrollInlineAiBody(int delta, size_t content_cols) {
     }
 
     InlineAiSession& session = *state_.inlineAiSession();
-    const size_t current = std::min(session.cursor_body_row, body_rows - 1);
+    const size_t visible_rows = screen_.InlineAiVisibleBodyRowCount(state_, content_cols);
+    const size_t max_scroll_row = body_rows > visible_rows ? body_rows - visible_rows : 0;
+    session.scroll_row = std::min(session.scroll_row, max_scroll_row);
     if (delta < 0) {
         const size_t step = static_cast<size_t>(-delta);
-        if (step > current) {
-            return LeaveInlineAiBody(std::min(session.anchor_row, state_.fileBuffer().lineCount() - 1));
-        }
-        return SetInlineAiCursorBodyRow(current - step, content_cols);
+        session.scroll_row = step > session.scroll_row ? 0 : session.scroll_row - step;
+    } else {
+        session.scroll_row = std::min(max_scroll_row, session.scroll_row + static_cast<size_t>(delta));
     }
-
-    const size_t step = static_cast<size_t>(delta);
-    if (current + step >= body_rows) {
-        const size_t anchor_row = std::min(session.anchor_row, state_.fileBuffer().lineCount() - 1);
-        if (anchor_row + 1 >= state_.fileBuffer().lineCount()) {
-            state_.setStatus("End of file.");
-            return true;
-        }
-        return LeaveInlineAiBody(anchor_row + 1);
-    }
-    return SetInlineAiCursorBodyRow(current + step, content_cols);
+    session.cursor_body_row = std::min(session.scroll_row, body_rows - 1);
+    return true;
 }
 
 bool EditorApp::SetInlineAiCursorBodyRow(size_t cursor_body_row, size_t content_cols) {
@@ -1527,6 +1540,77 @@ void EditorApp::RunBuild() {
     state_.setStatus("Build finished with exit code " + std::to_string(result.exit_code) + ".");
 }
 
+void EditorApp::SubmitInlineAiFollowUp() {
+    if (!state_.inlineAiSession().has_value()) {
+        return;
+    }
+    if (state_.aiProviderName() == "OFF") {
+        state_.setStatus("AI is disabled. Use :enable-ai openai or :enable-ai codex to enable it.", 60);
+        return;
+    }
+    if (active_ai_request_.has_value() || ai_client_->HasActiveRequest()) {
+        state_.setStatus("AI request already in progress.", 60);
+        return;
+    }
+
+    InlineAiSession session = *state_.inlineAiSession();
+    const bool has_question =
+        std::any_of(session.input_text.begin(), session.input_text.end(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        });
+    if (!has_question) {
+        state_.setStatus("Type a follow-up question first.");
+        return;
+    }
+
+    const std::string previous_text = session.text;
+    const std::string question = session.input_text;
+    std::string response_prefix = previous_text;
+    if (!response_prefix.empty() && response_prefix.back() != '\n') {
+        response_prefix += '\n';
+    }
+    response_prefix += "\nYou: " + question + "\n\nAI: ";
+
+    session.text = response_prefix;
+    session.input_text.clear();
+    session.input_cursor_col = 0;
+    session.scroll_row = std::numeric_limits<size_t>::max();
+    session.cursor_body_row = std::numeric_limits<size_t>::max();
+    session.waiting = true;
+    session.failed = false;
+    session.state_label = AiRequestStateLabel(AiRequestState::Connecting);
+    state_.setInlineAiSession(session);
+
+    const std::string instruction =
+        "This is a follow-up question about your previous explanation.\n\nPrevious explanation:\n" +
+        previous_text + "\n\nUser follow-up:\n" + question;
+    const AiRequest request = BuildAiRequest(AiRequestKind::Explain, instruction);
+
+    active_ai_request_ = ActiveAiRequest{.kind = AiRequestKind::Explain,
+                                         .label = "Answering follow-up",
+                                         .streamed_text = response_prefix,
+                                         .response_prefix = response_prefix,
+                                         .inline_viewer = true};
+    ai_request_backgrounded_ = false;
+    ai_loading_frame_ = 0;
+    next_ai_loading_tick_ = std::chrono::steady_clock::now();
+    state_.setAiRequestState(AiRequestStateLabel(AiRequestState::Connecting));
+    state_.setStatus("Answering follow-up via " + state_.aiProviderName() + "...", 3600);
+
+    std::string error;
+    if (!ai_client_->StartRequest(request, &error)) {
+        active_ai_request_.reset();
+        session.waiting = false;
+        session.failed = true;
+        session.state_label = AiRequestStateLabel(AiRequestState::Failed);
+        session.text = response_prefix + "\n[AI request failed]\n" +
+                       (error.empty() ? std::string("AI request failed.") : error);
+        state_.setInlineAiSession(session);
+        state_.setAiRequestState(AiRequestStateLabel(AiRequestState::Failed));
+        state_.setStatus(AiFailureStatus(error, false), 60);
+    }
+}
+
 AiRequest EditorApp::BuildAiRequest(AiRequestKind kind, const std::string& instruction) const {
     const Buffer& file = state_.fileBuffer();
     const size_t start_row = SelectionStartRow(state_);
@@ -1976,11 +2060,12 @@ void EditorApp::HandleAiResponse(const AiResponse& response) {
     const bool inline_explain = active_ai_request_.has_value() && active_ai_request_->inline_viewer &&
                                 active_ai_request_->kind == AiRequestKind::Explain;
     if (inline_explain) {
-        state_.setAiText(response.raw_text);
+        const std::string inline_text = active_ai_request_->response_prefix + response.raw_text;
+        state_.setAiText(inline_text);
         state_.setAiRequestState(AiRequestStateLabel(AiRequestState::Complete));
         if (!ai_request_backgrounded_ && state_.inlineAiSession().has_value()) {
-            ShowInlineAiText(response.raw_text, AiRequestStateLabel(AiRequestState::Complete), false, false);
-            state_.setStatus("AI explanation complete. Use arrows or PageUp/PageDown to scroll, Esc closes.", 60);
+            ShowInlineAiText(inline_text, AiRequestStateLabel(AiRequestState::Complete), false, false);
+            state_.setStatus("AI explanation complete. Type a follow-up in the box, Enter sends it.", 60);
         } else {
             state_.setStatus("AI explanation complete. Press Alt+E to reopen AI scratch.", 60);
         }

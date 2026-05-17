@@ -25,6 +25,9 @@ std::string BuildPrompt(const AiRequest& request) {
             AppendCodeFence(prompt, request.language, request.selected_text);
             prompt << "\nExplain what this code does, identify any likely issues, and explain the underlying "
                       "programming concepts clearly.\n";
+            if (!request.user_instruction.empty()) {
+                prompt << "\nUser request:\n" << request.user_instruction << "\n";
+            }
             break;
         case AiRequestKind::Fix:
         case AiRequestKind::Refactor:
@@ -58,4 +61,3 @@ std::string BuildPrompt(const AiRequest& request) {
 }
 
 }  // namespace flowstate
-

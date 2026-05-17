@@ -1,8 +1,10 @@
-# flowstate
+![](/home/dhruv/Pictures/Screenshots/Screenshot%20from%202026-05-17%2014-53-41.png)
+
+# take back control of your code
 
 flowstate is a terminal-first code editor with AI-assisted explain, fix, refactor, and build-error workflows. AI suggestions are shown in a scratch buffer first, and code changes move into a reviewable patch preview before you apply them.
 
-## Build
+## build
 
 ```bash
 cmake -S . -B build
@@ -15,7 +17,7 @@ Run the test suite:
 ctest --test-dir build --output-on-failure
 ```
 
-## Run
+## run
 
 Basic usage:
 
@@ -46,7 +48,7 @@ You can also set the default provider with:
 export FLOWSTATE_AI_MODE=codex
 ```
 
-## Core Workflow
+## core workflow
 
 1. Open a file.
 2. Move the cursor with the arrow keys, `Home`, `End`, `PageUp`, and `PageDown`.
@@ -55,7 +57,7 @@ export FLOWSTATE_AI_MODE=codex
 5. Press `Ctrl+R` to ask for a fix patch.
 6. Review the AI scratch buffer or patch preview.
 
-## Important Shortcuts
+## important shortcuts
 
 | Shortcut | Action |
 | --- | --- |
@@ -93,7 +95,7 @@ Notes:
 - In the file picker, type to filter, use arrow keys to select, press `Enter` to open, or `Esc` to cancel.
 - Cut, copy, and paste currently use an internal flowstate clipboard rather than the system clipboard.
 
-## C++ IntelliSense
+## c++ intelliSense
 
 flowstate can request C/C++/header completions from `clangd`.
 
@@ -105,7 +107,7 @@ Requirements:
 
 Completions open automatically while typing C++ identifiers and after `.`, `->`, and `::`. `Alt+I` can still request completions manually. Use arrow keys to select, `Enter` or `Tab` to accept, and `Esc` to cancel.
 
-## Command Mode
+## command mode
 
 Press `Alt+C` to open command mode, type a command, then press `Enter`.
 
@@ -129,9 +131,12 @@ Press `Alt+C` to open command mode, type a command, then press `Enter`.
 
 Press `Esc` in command mode to cancel it.
 
-## AI Views
+Inline AI explanations include a follow-up input area. Move into the explanation with the
+arrow keys, type a question, and press `Enter` to send it.
 
-### AI Scratch
+## AI views
+
+### AI scratch
 
 The AI scratch buffer is where streamed AI output appears first.
 
@@ -139,7 +144,7 @@ The AI scratch buffer is where streamed AI output appears first.
 - For explain and error requests, the final text stays in the scratch buffer.
 - For fix and refactor requests, flowstate attempts to extract a unified diff when the response completes.
 
-### Patch Preview
+### patch preview
 
 If AI returns a valid patch for the current file, flowstate switches to patch preview.
 
@@ -147,14 +152,14 @@ If AI returns a valid patch for the current file, flowstate switches to patch pr
 - Use `:patch accept-all` or `:patch reject-all` for bulk actions.
 - After applying or rejecting hunks, the preview refreshes automatically.
 
-### Build Output
+### build output
 
 Build output opens in its own buffer after `Ctrl+T` or `:build`.
 
 - If no build command was configured, the build output explains that directly.
 - `:ai error` uses the latest captured build output.
 
-## AI Provider Setup
+## AI provider setup
 
 AI is disabled by default. Use `--ai openai`, `--ai codex`, `FLOWSTATE_AI_MODE`, or
 `:enable-ai <openai|codex>` to enable AI for a session. Use `--no-ai` to start with AI
@@ -203,7 +208,7 @@ Run:
 ./build/flowstate <file> --ai codex
 ```
 
-## Status Bar
+## status bar
 
 The status bar shows:
 
@@ -215,7 +220,7 @@ The status bar shows:
 - cursor line and column
 - AI request state such as `CONNECTING`, `STREAMING`, `PARSING PATCH`, `FAILED`, or `COMPLETE`
 
-## Git Gutter
+## git gutter
 
 Inside a Git worktree, flowstate marks changes since the last commit in the line-number gutter:
 
@@ -227,7 +232,7 @@ Clean files render the normal solid gutter separator.
 
 Put the cursor on a blue modified line or red triangle line and press `Alt+D` to show or hide the previous lines inline. Git peeks are visual only; they are not part of the editable file buffer.
 
-## Tips
+## tips
 
 - Use `Shift+Arrow`, then `Ctrl+E` when you want AI to focus on a specific region.
 - Use `Ctrl+T` before `:ai error` so flowstate has fresh build output to analyze.

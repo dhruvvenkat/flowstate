@@ -66,6 +66,7 @@ class EditorApp {
     void RedoFileEdit();
     void RunBuild();
     void RunAiRequest(AiRequestKind kind, std::string instruction);
+    void SubmitInlineAiFollowUp();
     AiRequest BuildAiRequest(AiRequestKind kind, const std::string& instruction) const;
     void PollAiRequest();
     void PollCompletionRequest();
@@ -92,6 +93,7 @@ class EditorApp {
         AiRequestKind kind = AiRequestKind::Explain;
         std::string label;
         std::string streamed_text;
+        std::string response_prefix;
         bool inline_viewer = false;
     };
 

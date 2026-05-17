@@ -30,6 +30,7 @@ constexpr std::string_view kDiagnosticBackground = "\x1b[48;5;52m";
 constexpr std::string_view kSelectionBackground = "\x1b[48;5;238m";
 constexpr auto kGitStatusRefreshInterval = std::chrono::milliseconds(750);
 constexpr size_t kInlineAiMaxBodyRows = 12;
+constexpr size_t kInlineAiInputRows = 2;
 
 enum class AiDiffPhase {
     Outside,
@@ -206,6 +207,18 @@ size_t InlineAiBodyWidth(size_t content_cols) {
         return 0;
     }
     return content_cols - 4;
+}
+
+size_t InlineAiInputTextWidth(size_t content_cols) {
+    const size_t body_width = InlineAiBodyWidth(content_cols);
+    return body_width > 2 ? body_width - 2 : 0;
+}
+
+size_t InlineAiInputVisibleStart(const InlineAiSession& session, size_t input_width) {
+    if (input_width == 0 || session.input_cursor_col <= input_width) {
+        return 0;
+    }
+    return session.input_cursor_col - input_width;
 }
 
 std::string FitInlineText(std::string text, size_t width, std::string_view fill = " ") {
@@ -429,7 +442,7 @@ size_t InlineAiRowCountImpl(const EditorState& state, size_t content_cols) {
     if (state.activeView() != ViewKind::File || !state.inlineAiSession().has_value()) {
         return 0;
     }
-    return InlineAiVisibleBodyRowCountImpl(state, content_cols) + 2;
+    return InlineAiVisibleBodyRowCountImpl(state, content_cols) + kInlineAiInputRows + 3;
 }
 
 size_t InlineAiRowsBetweenImpl(const EditorState& state,
@@ -458,11 +471,11 @@ std::vector<std::string> RenderInlineAiRows(const InlineAiSession& session,
     const size_t max_scroll_row = body.size() > visible_body_rows ? body.size() - visible_body_rows : 0;
     const size_t scroll_row = std::min(session.scroll_row, max_scroll_row);
     std::vector<std::string> rows;
-    rows.reserve(visible_body_rows + 2);
+    rows.reserve(visible_body_rows + kInlineAiInputRows + 3);
 
     if (content_cols <= 2) {
         rows.push_back(std::string(kInlineAiBorderColor) + "┌┐" + std::string(ResetColorCode()));
-        for (size_t index = 0; index < visible_body_rows; ++index) {
+        for (size_t index = 0; index < visible_body_rows + kInlineAiInputRows + 1; ++index) {
             rows.push_back(std::string(kInlineAiBorderColor) + "││" + std::string(ResetColorCode()));
         }
         rows.push_back(std::string(kInlineAiBorderColor) + "└┘" + std::string(ResetColorCode()));
@@ -489,6 +502,22 @@ std::vector<std::string> RenderInlineAiRows(const InlineAiSession& session,
                        FitInlineText(body_line, InlineAiBodyWidth(content_cols)) +
                        std::string(kInlineAiBorderColor) + " │" + std::string(ResetColorCode()));
     }
+
+    rows.push_back(std::string(kInlineAiBorderColor) + "├" + FitInlineText("", inner_width, "─") + "┤" +
+                   std::string(ResetColorCode()));
+
+    const size_t input_width = InlineAiInputTextWidth(content_cols);
+    const size_t input_start = InlineAiInputVisibleStart(session, input_width);
+    const std::string visible_input =
+        input_width == 0 ? "" : session.input_text.substr(input_start, input_width);
+    rows.push_back(std::string(kInlineAiBorderColor) + "│ " + std::string(ResetColorCode()) +
+                   FitInlineText("> " + visible_input, InlineAiBodyWidth(content_cols)) +
+                   std::string(kInlineAiBorderColor) + " │" + std::string(ResetColorCode()));
+
+    const std::string input_hint = session.waiting ? "Waiting for AI response." : "Enter sends follow-up.";
+    rows.push_back(std::string(kInlineAiBorderColor) + "│ " + std::string(ResetColorCode()) +
+                   FitInlineText(input_hint, InlineAiBodyWidth(content_cols)) +
+                   std::string(kInlineAiBorderColor) + " │" + std::string(ResetColorCode()));
 
     std::string footer_text;
     if (session.waiting) {
@@ -1445,14 +1474,7 @@ std::string Screen::Render(const EditorState& state,
     } else if (state.activeView() == ViewKind::File && state.inlineAiSession().has_value() &&
                state.inlineAiSession()->focused && git_status != nullptr) {
         const InlineAiSession& session = *state.inlineAiSession();
-        const size_t body_rows = InlineAiBodyRowCountImpl(state, content_cols);
         const size_t visible_rows = InlineAiVisibleBodyRowCountImpl(state, content_cols);
-        const size_t max_scroll_row = body_rows > visible_rows ? body_rows - visible_rows : 0;
-        const size_t scroll_row = std::min(session.scroll_row, max_scroll_row);
-        const size_t cursor_body_row =
-            body_rows == 0 ? 0 : std::min(session.cursor_body_row, body_rows - 1);
-        const size_t body_visible_offset =
-            cursor_body_row >= scroll_row ? cursor_body_row - scroll_row : 0;
 
         size_t visual_cursor_row =
             session.anchor_row >= viewport.row_offset ? session.anchor_row - viewport.row_offset : 0;
@@ -1460,10 +1482,15 @@ std::string Screen::Render(const EditorState& state,
             visual_cursor_row += ExpandedGitRowsBefore(state, *git_status, viewport.row_offset, session.anchor_row);
             visual_cursor_row += ExpandedPreviousLinesForRow(state, *git_status, session.anchor_row).size();
         }
-        visual_cursor_row += 2 + body_visible_offset;
+        visual_cursor_row += visible_rows + 3;
 
         cursor_row = std::min(static_cast<size_t>(content_rows), visual_cursor_row + 1);
-        cursor_col = std::min(static_cast<size_t>(cols), gutter_width + (content_cols <= 2 ? 1 : 3));
+        const size_t input_width = InlineAiInputTextWidth(content_cols);
+        const size_t input_start = InlineAiInputVisibleStart(session, input_width);
+        const size_t input_offset =
+            session.input_cursor_col >= input_start ? session.input_cursor_col - input_start : 0;
+        cursor_col = std::min(static_cast<size_t>(cols),
+                              gutter_width + (content_cols <= 4 ? 1 : 5 + input_offset));
     } else {
         size_t visual_cursor_row =
             state.activeViewport().cursor.row >= viewport.row_offset

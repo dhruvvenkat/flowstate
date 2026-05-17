@@ -33,6 +33,8 @@ struct InlineAiSession {
     std::string provider_name;
     std::string state_label;
     std::string text;
+    std::string input_text;
+    size_t input_cursor_col = 0;
     bool waiting = false;
     bool failed = false;
 };

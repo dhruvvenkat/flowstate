@@ -1423,7 +1423,7 @@ void TestInlineAiExplainRendersInFileView() {
     });
 
     flowstate::Screen screen;
-    const std::string rendered = screen.Render(state, {}, 8, 80);
+    const std::string rendered = screen.Render(state, {}, 10, 80);
 
     Expect(state.activeView() == flowstate::ViewKind::File,
            "inline AI explain should keep the file view active");
@@ -1436,10 +1436,11 @@ void TestInlineAiExplainRendersInFileView() {
            "inline AI explain should render a clear top border");
     Expect(rendered.find("This explains the selected code") != std::string::npos,
            "inline AI explain should render the response text inline");
-    Expect(rendered.find(" │") != std::string::npos && rendered.find("└ Esc close") != std::string::npos &&
-               rendered.find("┘") != std::string::npos,
-           "inline AI explain should render side and bottom borders");
-    Expect(screen.InlineAiRowCount(state, screen.ContentColumns(state, 80)) >= 3,
+    Expect(rendered.find("├") != std::string::npos && rendered.find("> ") != std::string::npos,
+           "inline AI explain should render a separated follow-up input area");
+    Expect(rendered.find("Enter sends follow-up.") != std::string::npos,
+           "inline AI explain should show the follow-up input hint");
+    Expect(screen.InlineAiRowCount(state, screen.ContentColumns(state, 80)) >= 6,
            "inline AI explain should contribute virtual rows to the file view");
 }
 
@@ -1475,8 +1476,8 @@ void TestInlineAiExplainPanelIsScrollable() {
            "inline AI explain should keep the full wrapped body available");
     Expect(screen.InlineAiVisibleBodyRowCount(state, content_cols) == 12,
            "inline AI explain should cap the visible body rows");
-    Expect(screen.InlineAiRowCount(state, content_cols) == 14,
-           "inline AI explain virtual row count should include the capped body and borders");
+    Expect(screen.InlineAiRowCount(state, content_cols) == 17,
+           "inline AI explain virtual row count should include the capped body, input, and borders");
 
     const std::string top_rendered = screen.Render(state, {}, 18, 80);
     Expect(top_rendered.find("line 00") != std::string::npos,
@@ -1529,7 +1530,7 @@ void TestInlineAiExplainFooterShowsCodexUsageBars() {
     state.setAiRateLimits(TestRateLimits(25.0, 60.0));
 
     flowstate::Screen screen;
-    const std::string rendered = screen.Render(state, {}, 8, 100);
+    const std::string rendered = screen.Render(state, {}, 10, 100);
 
     Expect(rendered.find("5h [##------] 25%") != std::string::npos,
            "inline AI footer should show the 5h Codex usage bar");
