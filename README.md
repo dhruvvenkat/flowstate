@@ -50,11 +50,10 @@ export FLOWSTATE_AI_MODE=codex
 
 1. Open a file.
 2. Move the cursor with the arrow keys, `Home`, `End`, `PageUp`, and `PageDown`.
-3. Press `Ctrl+G` to start or clear a selection.
-4. Move the cursor to expand the selection.
-5. Press `Ctrl+E` to explain the current line or selection.
-6. Press `Ctrl+R` to ask for a fix patch.
-7. Review the AI scratch buffer or patch preview.
+3. Hold `Shift` while moving with the arrow keys, `Home`, or `End` to select text.
+4. Press `Ctrl+E` to explain the current line or selection.
+5. Press `Ctrl+R` to ask for a fix patch.
+6. Review the AI scratch buffer or patch preview.
 
 ## Important Shortcuts
 
@@ -62,7 +61,6 @@ export FLOWSTATE_AI_MODE=codex
 | --- | --- |
 | `Ctrl+S` | Save the current file |
 | `Ctrl+Q` | Quit. If the file is dirty, press it twice |
-| `Ctrl+G` | Toggle selection on or off |
 | `Ctrl+/` | Toggle line comments for the selected lines or current line |
 | Mouse wheel | Scroll the active buffer |
 | `Shift+Arrow` | Extend the current selection by character or line |
@@ -229,7 +227,7 @@ Put the cursor on a blue modified line or red triangle line and press `Alt+D` to
 
 ## Tips
 
-- Use `Ctrl+G`, move the cursor, then `Ctrl+E` when you want AI to focus on a specific region.
+- Use `Shift+Arrow`, then `Ctrl+E` when you want AI to focus on a specific region.
 - Use `Ctrl+T` before `:ai error` so flowstate has fresh build output to analyze.
 - If a patch is ready but you are back in the file buffer, press `Alt+P`.
 - If an AI request finishes while you are back in the file buffer, press `Alt+E` to reopen the scratch buffer.

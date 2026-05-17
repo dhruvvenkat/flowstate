@@ -53,7 +53,6 @@ class EditorApp {
     std::filesystem::path FilePickerRoot() const;
     std::vector<std::string> DiscoverFilePickerFiles() const;
     void SaveFile();
-    void ToggleSelection();
     void CopySelectionOrLine();
     void CutSelectionOrLine();
     void PasteClipboard();

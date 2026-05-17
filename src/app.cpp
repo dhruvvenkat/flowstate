@@ -231,7 +231,7 @@ EditorApp::EditorApp(Buffer file_buffer,
       clangd_client_(std::move(cpp_standard)) {
     state_.setBuildCommand(std::move(build_command));
     state_.setAiProviderName(std::move(ai_provider_name));
-    state_.setStatus("Alt+C commands, Ctrl+F finds, Ctrl+G selects, Ctrl+/ comments, Ctrl+C copies.");
+    state_.setStatus("Alt+C commands, Ctrl+F finds, Shift+Arrow selects, Ctrl+/ comments, Ctrl+C copies.");
 }
 
 int EditorApp::Run() {
@@ -399,9 +399,6 @@ void EditorApp::HandleNormalKey(const KeyPress& key) {
                 return;
             case 'z':
                 UndoFileEdit();
-                return;
-            case 'g':
-                ToggleSelection();
                 return;
             case '/':
                 ToggleLineComment();
@@ -1196,24 +1193,6 @@ void EditorApp::SaveFile() {
         state_.setStatus("Saved " + state_.fileBuffer().name() + ".");
     } else {
         state_.setStatus(error.empty() ? "Save failed." : error);
-    }
-}
-
-void EditorApp::ToggleSelection() {
-    if (state_.activeView() != ViewKind::File) {
-        state_.setStatus("Selection only works in the file buffer.");
-        return;
-    }
-
-    if (!state_.selection().active) {
-        state_.selection().active = true;
-        state_.selection().extend_on_cursor_move = true;
-        state_.selection().anchor = state_.fileCursor();
-        state_.selection().head = state_.fileCursor();
-        state_.setStatus("Selection started.");
-    } else {
-        state_.clearSelection();
-        state_.setStatus("Selection cleared.");
     }
 }
 
