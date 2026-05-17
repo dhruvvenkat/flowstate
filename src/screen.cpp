@@ -61,6 +61,11 @@ struct FileRenderState {
     std::vector<char> delimiter_stack;
 };
 
+struct InlineAiBodyLine {
+    std::string text;
+    bool user_message = false;
+};
+
 std::string EscapeLine(const std::string& text) {
     std::string output;
     output.reserve(text.size());
@@ -91,6 +96,10 @@ std::string DecoratePatchLine(const std::string& line) {
 
 bool StartsWith(std::string_view text, std::string_view prefix) {
     return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
+}
+
+bool IsUserAiMessageLine(std::string_view line) {
+    return StartsWith(line, "You: ");
 }
 
 std::string RenderVisibleText(std::string_view line, size_t col_offset, size_t cols) {
@@ -410,15 +419,18 @@ std::vector<std::string> WrapPlainLine(std::string_view line, size_t width) {
     return wrapped;
 }
 
-std::vector<std::string> WrappedInlineAiBody(const InlineAiSession& session, size_t content_cols) {
+std::vector<InlineAiBodyLine> WrappedInlineAiBody(const InlineAiSession& session, size_t content_cols) {
     const size_t body_width = InlineAiBodyWidth(content_cols);
-    std::vector<std::string> body;
+    std::vector<InlineAiBodyLine> body;
     for (const std::string& line : SplitPlainLines(session.text)) {
+        const bool user_message = IsUserAiMessageLine(line);
         std::vector<std::string> wrapped = WrapPlainLine(line, body_width);
-        body.insert(body.end(), wrapped.begin(), wrapped.end());
+        for (std::string& wrapped_line : wrapped) {
+            body.push_back({std::move(wrapped_line), user_message});
+        }
     }
     if (body.empty()) {
-        body.emplace_back();
+        body.push_back({});
     }
     return body;
 }
@@ -466,7 +478,7 @@ std::string InlineAiGutter(const Buffer& buffer) {
 std::vector<std::string> RenderInlineAiRows(const InlineAiSession& session,
                                             const std::optional<RateLimitSnapshotInfo>& rate_limits,
                                             size_t content_cols) {
-    const std::vector<std::string> body = WrappedInlineAiBody(session, content_cols);
+    const std::vector<InlineAiBodyLine> body = WrappedInlineAiBody(session, content_cols);
     const size_t visible_body_rows = InlineAiVisibleBodyRows(body.size());
     const size_t max_scroll_row = body.size() > visible_body_rows ? body.size() - visible_body_rows : 0;
     const size_t scroll_row = std::min(session.scroll_row, max_scroll_row);
@@ -497,10 +509,14 @@ std::vector<std::string> RenderInlineAiRows(const InlineAiSession& session,
                    std::string(kInlineAiBorderColor) + meta + "┐" + std::string(ResetColorCode()));
 
     for (size_t index = 0; index < visible_body_rows; ++index) {
-        const std::string& body_line = body[scroll_row + index];
+        const InlineAiBodyLine& body_line = body[scroll_row + index];
+        std::string rendered_line = FitInlineText(body_line.text, InlineAiBodyWidth(content_cols));
+        if (body_line.user_message) {
+            rendered_line = std::string("\x1b[1m") + rendered_line + "\x1b[22m";
+        }
         rows.push_back(std::string(kInlineAiBorderColor) + "│ " + std::string(ResetColorCode()) +
-                       FitInlineText(body_line, InlineAiBodyWidth(content_cols)) +
-                       std::string(kInlineAiBorderColor) + " │" + std::string(ResetColorCode()));
+                       rendered_line + std::string(kInlineAiBorderColor) + " │" +
+                       std::string(ResetColorCode()));
     }
 
     rows.push_back(std::string(kInlineAiBorderColor) + "├" + FitInlineText("", inner_width, "─") + "┤" +
@@ -959,6 +975,9 @@ std::string RenderAiScratchLine(std::string_view line,
 
     if (state_after != nullptr) {
         *state_after = AdvanceAiDiffRenderState(line, highlighter, state_before);
+    }
+    if (IsUserAiMessageLine(line)) {
+        rendered = std::string("\x1b[1m") + rendered + "\x1b[22m";
     }
     return rendered;
 }

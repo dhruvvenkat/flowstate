@@ -1408,6 +1408,24 @@ void TestAiScratchDoesNotRenderLineNumbers() {
     Expect(screen.ContentColumns(state, 20) == 20, "AI scratch width should not reserve gutter space");
 }
 
+void TestAiScratchBoldsUserMessages() {
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.cpp");
+    buffer.setText("int main() {}", false);
+
+    flowstate::EditorState state(std::move(buffer));
+    state.setAiText("AI: Initial explanation\n\nYou: Can you clarify?\n\nAI: Yes");
+    state.setActiveView(flowstate::ViewKind::AiScratch);
+
+    flowstate::Screen screen;
+    const std::string rendered = screen.Render(state, {}, 8, 80);
+
+    Expect(rendered.find("\x1b[1mYou: Can you clarify?") != std::string::npos,
+           "AI scratch should bold user-sent messages");
+    Expect(rendered.find("\x1b[1mAI: Initial explanation") == std::string::npos,
+           "AI scratch should not bold AI response lines");
+}
+
 void TestInlineAiExplainRendersInFileView() {
     flowstate::Buffer buffer;
     buffer.setPath("sample.cpp");
@@ -1442,6 +1460,30 @@ void TestInlineAiExplainRendersInFileView() {
            "inline AI explain should show the follow-up input hint");
     Expect(screen.InlineAiRowCount(state, screen.ContentColumns(state, 80)) >= 6,
            "inline AI explain should contribute virtual rows to the file view");
+}
+
+void TestInlineAiExplainBoldsUserMessages() {
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.cpp");
+    buffer.setText("int main() {\n    return 0;\n}", false);
+
+    flowstate::EditorState state(std::move(buffer));
+    state.setInlineAiSession(flowstate::InlineAiSession{
+        .anchor_row = 0,
+        .title = "AI Explain",
+        .provider_name = "CODEX",
+        .state_label = "COMPLETE",
+        .text = "AI: This is the original explanation.\n\nYou: What does this mean?\n\nAI: It means the "
+                "function exits successfully.",
+    });
+
+    flowstate::Screen screen;
+    const std::string rendered = screen.Render(state, {}, 12, 80);
+
+    Expect(rendered.find("\x1b[1mYou: What does this mean?") != std::string::npos,
+           "inline AI explain should bold user-sent messages");
+    Expect(rendered.find("\x1b[1mAI: This is the original explanation.") == std::string::npos,
+           "inline AI explain should not bold AI response lines");
 }
 
 void TestInlineAiExplainPanelIsScrollable() {
@@ -1932,7 +1974,9 @@ int main() {
         TestSelectionUsesStableBackgroundHighlight();
         TestCompletionPopupDoesNotMoveStatusBar();
         TestAiScratchDoesNotRenderLineNumbers();
+        TestAiScratchBoldsUserMessages();
         TestInlineAiExplainRendersInFileView();
+        TestInlineAiExplainBoldsUserMessages();
         TestInlineAiExplainPanelIsScrollable();
         TestInlineAiExplainFooterShowsCodexUsageBars();
         TestAiScratchDiffHunksUseFileSyntaxHighlighting();
