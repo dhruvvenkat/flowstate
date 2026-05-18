@@ -1836,6 +1836,14 @@ void TestCompletionPrefixAndTriggers() {
     Expect(flowstate::IsCompletionAutoTrigger(typescript_buffer, {.row = 1, .col = 3}),
            "identifier characters should trigger TypeScript completion while typing");
 
+    flowstate::Buffer go_buffer;
+    go_buffer.setPath("sample.go");
+    go_buffer.setText("fmt.Println\nres", false);
+    Expect(flowstate::IsCompletionAutoTrigger(go_buffer, {.row = 0, .col = 4}),
+           "dot should trigger Go completion");
+    Expect(flowstate::IsCompletionAutoTrigger(go_buffer, {.row = 1, .col = 3}),
+           "identifier characters should trigger Go completion while typing");
+
     flowstate::Buffer text_buffer;
     text_buffer.setPath("notes.txt");
     text_buffer.setText("object.", false);
@@ -1858,6 +1866,11 @@ void TestLanguageServerRouting() {
         flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::TypeScript);
     Expect(typescript_server.has_value() && *typescript_server == flowstate::LanguageServerKind::TypeScript,
            "TypeScript should route to the TypeScript language server");
+
+    const std::optional<flowstate::LanguageServerKind> go_server =
+        flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Go);
+    Expect(go_server.has_value() && *go_server == flowstate::LanguageServerKind::Go,
+           "Go should route to gopls");
 
     const std::optional<flowstate::LanguageServerKind> cpp_server =
         flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Cpp);

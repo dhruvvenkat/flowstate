@@ -85,7 +85,7 @@ export FLOWSTATE_AI_MODE=codex
 | `Alt+R` | Reject the current hunk in patch preview |
 | `Alt+C` | Enter command mode |
 | `Alt+D` | Toggle previous-line peek when the cursor is on a blue or red Git gutter marker |
-| `Alt+I` | Request IntelliSense completions for C/C++ or Python |
+| `Alt+I` | Request IntelliSense completions for supported code files |
 
 Notes:
 
@@ -97,13 +97,14 @@ Notes:
 
 ## intelliSense
 
-flowstate can request C/C++/header completions from `clangd`, Python completions from the project `pyright` dependency, and JavaScript/TypeScript completions from the project TypeScript language-server dependencies.
+flowstate can request C/C++/header completions from `clangd`, Python completions from the project `pyright` dependency, JavaScript/TypeScript completions from the project TypeScript language-server dependencies, and Go completions from `gopls`.
 
 Requirements:
 
 - `clangd` must be installed and available on `PATH`, or `FLOWSTATE_CLANGD_PATH` must point to it.
 - Python IntelliSense needs `npm install` to install the project `pyright` dependency. `FLOWSTATE_PYTHON_LSP_PATH` can point to another Python language server binary.
 - JavaScript and TypeScript IntelliSense needs `npm install` to install `typescript-language-server` and `typescript`. `FLOWSTATE_TYPESCRIPT_LSP_PATH` can point to another TypeScript language-server binary.
+- Go IntelliSense needs `gopls` on `PATH`, in a standard Go bin directory such as `~/go/bin`, or `FLOWSTATE_GO_LSP_PATH` pointing to it.
 - Project-aware completions work best when CMake writes `compile_commands.json`.
 - `--cpp-standard <standard>` or `FLOWSTATE_CPP_STANDARD=<standard>` sets clangd fallback parsing for C++ files without compile commands.
 

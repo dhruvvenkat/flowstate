@@ -95,6 +95,48 @@ std::optional<std::filesystem::path> FindLocalNodeExecutable(std::string_view na
     return FindLocalNodeExecutableFrom(current_executable->parent_path(), name);
 }
 
+std::optional<std::filesystem::path> FindGoBinExecutable(std::string_view name) {
+    const char* gobin = std::getenv("GOBIN");
+    if (gobin != nullptr && *gobin != '\0') {
+        const std::filesystem::path candidate = std::filesystem::path(gobin) / std::string(name);
+        if (IsExecutable(candidate)) {
+            return candidate;
+        }
+    }
+
+    const char* gopath = std::getenv("GOPATH");
+    if (gopath != nullptr && *gopath != '\0') {
+        std::string_view paths(gopath);
+        size_t start = 0;
+        while (start <= paths.size()) {
+            const size_t end = paths.find(':', start);
+            const std::string_view entry =
+                end == std::string_view::npos ? paths.substr(start) : paths.substr(start, end - start);
+            if (!entry.empty()) {
+                const std::filesystem::path candidate =
+                    std::filesystem::path(std::string(entry)) / "bin" / std::string(name);
+                if (IsExecutable(candidate)) {
+                    return candidate;
+                }
+            }
+            if (end == std::string_view::npos) {
+                break;
+            }
+            start = end + 1;
+        }
+    }
+
+    const char* home = std::getenv("HOME");
+    if (home != nullptr && *home != '\0') {
+        const std::filesystem::path candidate = std::filesystem::path(home) / "go" / "bin" / std::string(name);
+        if (IsExecutable(candidate)) {
+            return candidate;
+        }
+    }
+
+    return std::nullopt;
+}
+
 std::optional<std::filesystem::path> ResolveClangdExecutable() {
     const char* configured = std::getenv("FLOWSTATE_CLANGD_PATH");
     if (configured != nullptr && *configured != '\0') {
@@ -208,6 +250,43 @@ std::optional<ServerDefinition> ResolveTypeScriptServer(std::string* error) {
     return std::nullopt;
 }
 
+std::optional<ServerDefinition> ResolveGoServer(std::string* error) {
+    const char* configured = std::getenv("FLOWSTATE_GO_LSP_PATH");
+    if (configured != nullptr && *configured != '\0') {
+        const std::optional<std::filesystem::path> executable = FindExecutable(configured);
+        if (!executable.has_value()) {
+            if (error != nullptr) {
+                *error = "Go language server not found at FLOWSTATE_GO_LSP_PATH.";
+            }
+            return std::nullopt;
+        }
+        return ServerDefinition{
+            .executable = *executable,
+            .display_name = FileName(*executable),
+        };
+    }
+
+    if (const std::optional<std::filesystem::path> executable = FindExecutable("gopls"); executable.has_value()) {
+        return ServerDefinition{
+            .executable = *executable,
+            .display_name = "gopls",
+        };
+    }
+    if (const std::optional<std::filesystem::path> executable = FindGoBinExecutable("gopls");
+        executable.has_value()) {
+        return ServerDefinition{
+            .executable = *executable,
+            .display_name = "gopls",
+        };
+    }
+
+    if (error != nullptr) {
+        *error = "Go language server not found. Install gopls with `go install golang.org/x/tools/gopls@latest`, "
+                 "or set FLOWSTATE_GO_LSP_PATH.";
+    }
+    return std::nullopt;
+}
+
 std::optional<ServerDefinition> ResolveServer(LanguageServerKind kind, std::string* error) {
     switch (kind) {
         case LanguageServerKind::Clangd: {
@@ -228,6 +307,8 @@ std::optional<ServerDefinition> ResolveServer(LanguageServerKind kind, std::stri
             return ResolvePythonServer(error);
         case LanguageServerKind::TypeScript:
             return ResolveTypeScriptServer(error);
+        case LanguageServerKind::Go:
+            return ResolveGoServer(error);
     }
     return std::nullopt;
 }
@@ -468,6 +549,8 @@ std::string LanguageIdForBuffer(const Buffer& buffer) {
             return "javascript";
         case LanguageId::TypeScript:
             return "typescript";
+        case LanguageId::Go:
+            return "go";
         default:
             return "plaintext";
     }
@@ -969,7 +1052,7 @@ std::filesystem::path ResolveClangdProjectRoot(const Buffer& buffer) {
 std::filesystem::path ResolveLanguageServerProjectRoot(const Buffer& buffer) {
     const LanguageId language_id = buffer.languageId();
     if (language_id == LanguageId::Python || language_id == LanguageId::JavaScript ||
-        language_id == LanguageId::TypeScript) {
+        language_id == LanguageId::TypeScript || language_id == LanguageId::Go) {
         std::filesystem::path path = AbsolutePathForBuffer(buffer);
         if (!std::filesystem::is_directory(path)) {
             path = path.parent_path();
@@ -990,7 +1073,10 @@ std::filesystem::path ResolveLanguageServerProjectRoot(const Buffer& buffer) {
                 (std::filesystem::exists(current / "tsconfig.json") ||
                  std::filesystem::exists(current / "jsconfig.json") ||
                  std::filesystem::exists(current / "package.json"));
-            if (python_root || typescript_root || std::filesystem::exists(current / ".git")) {
+            const bool go_root = language_id == LanguageId::Go &&
+                                 (std::filesystem::exists(current / "go.work") ||
+                                  std::filesystem::exists(current / "go.mod"));
+            if (python_root || typescript_root || go_root || std::filesystem::exists(current / ".git")) {
                 return current;
             }
             const std::filesystem::path parent = current.parent_path();
@@ -1014,6 +1100,9 @@ std::optional<LanguageServerKind> LanguageServerKindForLanguage(LanguageId langu
     }
     if (language_id == LanguageId::JavaScript || language_id == LanguageId::TypeScript) {
         return LanguageServerKind::TypeScript;
+    }
+    if (language_id == LanguageId::Go) {
+        return LanguageServerKind::Go;
     }
     return std::nullopt;
 }

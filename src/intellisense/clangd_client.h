@@ -23,6 +23,7 @@ enum class LanguageServerKind {
     Clangd,
     Python,
     TypeScript,
+    Go,
 };
 
 struct CompletionEvent {
