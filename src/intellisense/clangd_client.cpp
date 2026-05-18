@@ -55,6 +55,46 @@ std::optional<std::filesystem::path> FindExecutable(std::string_view name) {
     return std::nullopt;
 }
 
+std::optional<std::filesystem::path> CurrentExecutablePath() {
+    std::vector<char> buffer(4096);
+    const ssize_t size = ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+    if (size <= 0) {
+        return std::nullopt;
+    }
+    buffer[static_cast<size_t>(size)] = '\0';
+    return std::filesystem::path(buffer.data());
+}
+
+std::optional<std::filesystem::path> FindLocalNodeExecutableFrom(std::filesystem::path current,
+                                                                 std::string_view name) {
+    while (!current.empty()) {
+        const std::filesystem::path candidate = current / "node_modules" / ".bin" / std::string(name);
+        if (IsExecutable(candidate)) {
+            return candidate;
+        }
+        const std::filesystem::path parent = current.parent_path();
+        if (parent == current) {
+            break;
+        }
+        current = parent;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::filesystem::path> FindLocalNodeExecutable(std::string_view name) {
+    if (const std::optional<std::filesystem::path> executable =
+            FindLocalNodeExecutableFrom(std::filesystem::current_path(), name);
+        executable.has_value()) {
+        return executable;
+    }
+
+    const std::optional<std::filesystem::path> current_executable = CurrentExecutablePath();
+    if (!current_executable.has_value()) {
+        return std::nullopt;
+    }
+    return FindLocalNodeExecutableFrom(current_executable->parent_path(), name);
+}
+
 std::optional<std::filesystem::path> ResolveClangdExecutable() {
     const char* configured = std::getenv("FLOWSTATE_CLANGD_PATH");
     if (configured != nullptr && *configured != '\0') {
@@ -96,6 +136,14 @@ std::optional<ServerDefinition> ResolvePythonServer(std::string* error) {
         return server;
     }
 
+    if (const std::optional<std::filesystem::path> executable = FindLocalNodeExecutable("pyright-langserver");
+        executable.has_value()) {
+        return ServerDefinition{
+            .executable = *executable,
+            .arguments = {"--stdio"},
+            .display_name = "pyright-langserver",
+        };
+    }
     if (const std::optional<std::filesystem::path> executable = FindExecutable("pyright-langserver");
         executable.has_value()) {
         return ServerDefinition{
@@ -112,7 +160,7 @@ std::optional<ServerDefinition> ResolvePythonServer(std::string* error) {
     }
 
     if (error != nullptr) {
-        *error = "Python language server not found. Install pyright-langserver or pylsp, or set "
+        *error = "Python language server not found. Run npm install for the project pyright dependency, or set "
                  "FLOWSTATE_PYTHON_LSP_PATH.";
     }
     return std::nullopt;

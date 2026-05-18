@@ -1827,6 +1827,21 @@ void TestCompletionPrefixAndTriggers() {
            "unsupported files should not auto-trigger IntelliSense");
 }
 
+void TestLanguageServerRouting() {
+    const std::optional<flowstate::LanguageServerKind> python_server =
+        flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Python);
+    Expect(python_server.has_value() && *python_server == flowstate::LanguageServerKind::Python,
+           "Python should route to the Python language server");
+
+    const std::optional<flowstate::LanguageServerKind> cpp_server =
+        flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Cpp);
+    Expect(cpp_server.has_value() && *cpp_server == flowstate::LanguageServerKind::Clangd,
+           "C++ should route to clangd");
+
+    Expect(!flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Markdown).has_value(),
+           "unsupported languages should not route to a language server");
+}
+
 void TestApplyCompletionItem() {
     flowstate::Buffer buffer;
     buffer.setPath("sample.cpp");
@@ -2115,6 +2130,7 @@ int main() {
         TestNoAiClientDisabled();
         TestJsonParsing();
         TestCompletionPrefixAndTriggers();
+        TestLanguageServerRouting();
         TestApplyCompletionItem();
         TestCompletionParsing();
         TestDiagnosticParsingAndRendering();

@@ -97,12 +97,12 @@ Notes:
 
 ## intelliSense
 
-flowstate can request C/C++/header completions from `clangd` and Python completions from a Python language server.
+flowstate can request C/C++/header completions from `clangd` and Python completions from the project `pyright` dependency.
 
 Requirements:
 
 - `clangd` must be installed and available on `PATH`, or `FLOWSTATE_CLANGD_PATH` must point to it.
-- Python IntelliSense needs `pyright-langserver` or `pylsp` on `PATH`, or `FLOWSTATE_PYTHON_LSP_PATH` must point to one of them.
+- Python IntelliSense needs `npm install` to install the project `pyright` dependency. `FLOWSTATE_PYTHON_LSP_PATH` can point to another Python language server binary.
 - Project-aware completions work best when CMake writes `compile_commands.json`.
 - `--cpp-standard <standard>` or `FLOWSTATE_CPP_STANDARD=<standard>` sets clangd fallback parsing for C++ files without compile commands.
 
