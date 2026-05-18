@@ -32,6 +32,8 @@ constexpr std::string_view kSelectionBackground = "\x1b[48;5;238m";
 constexpr auto kGitStatusRefreshInterval = std::chrono::milliseconds(750);
 constexpr size_t kInlineAiMaxBodyRows = 12;
 constexpr size_t kInlineAiInputRows = 1;
+constexpr size_t kDiagnosticBubbleMaxWidth = 96;
+constexpr size_t kDiagnosticBubbleMaxRows = 4;
 
 enum class AiDiffPhase {
     Outside,
@@ -1402,12 +1404,28 @@ void RenderDiagnosticBubble(std::ostringstream& output,
         }
     }
 
-    const size_t width = std::min<size_t>(std::max<size_t>(text.size(), 18), std::min<size_t>(72, cols));
-    if (text.size() > width) {
-        text.resize(width);
+    const size_t width_limit = std::min<size_t>(kDiagnosticBubbleMaxWidth, static_cast<size_t>(cols));
+    const size_t width = std::min<size_t>(std::max<size_t>(std::min(text.size(), width_limit), 18), width_limit);
+    std::vector<std::string> rows = WrapPlainLine(text, width);
+    if (rows.size() > kDiagnosticBubbleMaxRows) {
+        rows.resize(kDiagnosticBubbleMaxRows);
+        std::string& last = rows.back();
+        if (width > 3) {
+            if (last.size() > width - 3) {
+                last.resize(width - 3);
+            }
+            last += "...";
+        } else {
+            last.resize(std::min(last.size(), width));
+        }
     }
-    if (text.size() < width) {
-        text += std::string(width - text.size(), ' ');
+    for (std::string& row : rows) {
+        if (row.size() > width) {
+            row.resize(width);
+        }
+        if (row.size() < width) {
+            row += std::string(width - row.size(), ' ');
+        }
     }
 
     size_t visual_cursor_row =
@@ -1417,8 +1435,8 @@ void RenderDiagnosticBubble(std::ostringstream& output,
     visual_cursor_row += InlineAiRowsBetweenImpl(state, content_cols, viewport.row_offset, cursor.row);
     visual_cursor_row = std::min<size_t>(visual_cursor_row, static_cast<size_t>(content_rows - 1));
     size_t bubble_row = visual_cursor_row + 2;
-    if (bubble_row > static_cast<size_t>(content_rows)) {
-        bubble_row = visual_cursor_row > 0 ? visual_cursor_row : 1;
+    if (bubble_row + rows.size() - 1 > static_cast<size_t>(content_rows)) {
+        bubble_row = visual_cursor_row >= rows.size() ? visual_cursor_row - rows.size() + 1 : 1;
     }
 
     size_t bubble_col = gutter_width + 1;
@@ -1432,9 +1450,11 @@ void RenderDiagnosticBubble(std::ostringstream& output,
         bubble_col = static_cast<size_t>(cols) - width + 1;
     }
 
-    output << "\x1b[" << bubble_row << ";" << bubble_col << "H"
-           << "\x1b[48;5;52m" << DefaultForegroundCode() << text << ResetColorCode()
-           << ResetBackgroundCode();
+    for (size_t index = 0; index < rows.size(); ++index) {
+        output << "\x1b[" << (bubble_row + index) << ";" << bubble_col << "H"
+               << "\x1b[48;5;52m" << DefaultForegroundCode() << rows[index] << ResetColorCode()
+               << ResetBackgroundCode();
+    }
 }
 
 }  // namespace

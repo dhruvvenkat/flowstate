@@ -91,7 +91,7 @@ bool IsCppCompletionLanguage(LanguageId language_id) {
 bool IsCompletionLanguage(LanguageId language_id) {
     return IsCppCompletionLanguage(language_id) || language_id == LanguageId::Python ||
            language_id == LanguageId::JavaScript || language_id == LanguageId::TypeScript ||
-           language_id == LanguageId::Go;
+           language_id == LanguageId::Go || language_id == LanguageId::Rust;
 }
 
 Cursor CompletionPrefixStart(const Buffer& buffer, Cursor cursor) {
@@ -192,10 +192,10 @@ bool IsCompletionAutoTrigger(const Buffer& buffer, Cursor cursor) {
     if (previous == '.') {
         return true;
     }
-    if (!IsCppCompletionLanguage(language_id)) {
+    if (!IsCppCompletionLanguage(language_id) && language_id != LanguageId::Rust) {
         return false;
     }
-    if (previous == '>' && cursor.col >= 2 && line[cursor.col - 2] == '-') {
+    if (IsCppCompletionLanguage(language_id) && previous == '>' && cursor.col >= 2 && line[cursor.col - 2] == '-') {
         return true;
     }
     return previous == ':' && cursor.col >= 2 && line[cursor.col - 2] == ':';

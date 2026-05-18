@@ -24,6 +24,7 @@ enum class LanguageServerKind {
     Python,
     TypeScript,
     Go,
+    Rust,
 };
 
 struct CompletionEvent {

@@ -287,6 +287,36 @@ std::optional<ServerDefinition> ResolveGoServer(std::string* error) {
     return std::nullopt;
 }
 
+std::optional<ServerDefinition> ResolveRustServer(std::string* error) {
+    const char* configured = std::getenv("FLOWSTATE_RUST_LSP_PATH");
+    if (configured != nullptr && *configured != '\0') {
+        const std::optional<std::filesystem::path> executable = FindExecutable(configured);
+        if (!executable.has_value()) {
+            if (error != nullptr) {
+                *error = "Rust language server not found at FLOWSTATE_RUST_LSP_PATH.";
+            }
+            return std::nullopt;
+        }
+        return ServerDefinition{
+            .executable = *executable,
+            .display_name = FileName(*executable),
+        };
+    }
+
+    if (const std::optional<std::filesystem::path> executable = FindExecutable("rust-analyzer");
+        executable.has_value()) {
+        return ServerDefinition{
+            .executable = *executable,
+            .display_name = "rust-analyzer",
+        };
+    }
+
+    if (error != nullptr) {
+        *error = "Rust language server not found. Install rust-analyzer or set FLOWSTATE_RUST_LSP_PATH.";
+    }
+    return std::nullopt;
+}
+
 std::optional<ServerDefinition> ResolveServer(LanguageServerKind kind, std::string* error) {
     switch (kind) {
         case LanguageServerKind::Clangd: {
@@ -309,6 +339,8 @@ std::optional<ServerDefinition> ResolveServer(LanguageServerKind kind, std::stri
             return ResolveTypeScriptServer(error);
         case LanguageServerKind::Go:
             return ResolveGoServer(error);
+        case LanguageServerKind::Rust:
+            return ResolveRustServer(error);
     }
     return std::nullopt;
 }
@@ -551,6 +583,8 @@ std::string LanguageIdForBuffer(const Buffer& buffer) {
             return "typescript";
         case LanguageId::Go:
             return "go";
+        case LanguageId::Rust:
+            return "rust";
         default:
             return "plaintext";
     }
@@ -1052,7 +1086,8 @@ std::filesystem::path ResolveClangdProjectRoot(const Buffer& buffer) {
 std::filesystem::path ResolveLanguageServerProjectRoot(const Buffer& buffer) {
     const LanguageId language_id = buffer.languageId();
     if (language_id == LanguageId::Python || language_id == LanguageId::JavaScript ||
-        language_id == LanguageId::TypeScript || language_id == LanguageId::Go) {
+        language_id == LanguageId::TypeScript || language_id == LanguageId::Go ||
+        language_id == LanguageId::Rust) {
         std::filesystem::path path = AbsolutePathForBuffer(buffer);
         if (!std::filesystem::is_directory(path)) {
             path = path.parent_path();
@@ -1076,7 +1111,12 @@ std::filesystem::path ResolveLanguageServerProjectRoot(const Buffer& buffer) {
             const bool go_root = language_id == LanguageId::Go &&
                                  (std::filesystem::exists(current / "go.work") ||
                                   std::filesystem::exists(current / "go.mod"));
-            if (python_root || typescript_root || go_root || std::filesystem::exists(current / ".git")) {
+            const bool rust_root =
+                language_id == LanguageId::Rust &&
+                (std::filesystem::exists(current / "Cargo.toml") ||
+                 std::filesystem::exists(current / "Cargo.lock") ||
+                 std::filesystem::exists(current / "rust-project.json"));
+            if (python_root || typescript_root || go_root || rust_root || std::filesystem::exists(current / ".git")) {
                 return current;
             }
             const std::filesystem::path parent = current.parent_path();
@@ -1103,6 +1143,9 @@ std::optional<LanguageServerKind> LanguageServerKindForLanguage(LanguageId langu
     }
     if (language_id == LanguageId::Go) {
         return LanguageServerKind::Go;
+    }
+    if (language_id == LanguageId::Rust) {
+        return LanguageServerKind::Rust;
     }
     return std::nullopt;
 }

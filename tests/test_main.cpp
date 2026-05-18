@@ -697,6 +697,24 @@ void TestRustHighlighterSpans() {
            "continued raw rust strings should stay tokenized as strings");
     Expect(HasSpan(spans, 22, 29, flowstate::SyntaxTokenKind::Number),
            "rust numeric suffixes should remain part of the number token");
+
+    spans.clear();
+    state = highlighter.HighlightLine("#[derive(Debug, Clone)]", {}, &spans);
+    Expect(HasSpan(spans, 2, 8, flowstate::SyntaxTokenKind::Macro),
+           "rust attribute names should be tokenized as macros");
+    Expect(HasSpan(spans, 9, 14, flowstate::SyntaxTokenKind::Type),
+           "rust attribute type arguments should remain tokenized as types");
+    Expect(HasSpan(spans, 16, 21, flowstate::SyntaxTokenKind::Type),
+           "additional rust attribute type arguments should remain tokenized as types");
+
+    spans.clear();
+    state = highlighter.HighlightLine("let borrowed: &'a str = r#type;", {}, &spans);
+    Expect(HasSpan(spans, 15, 17, flowstate::SyntaxTokenKind::Type),
+           "rust lifetimes should be tokenized as type-like spans");
+    Expect(HasSpan(spans, 18, 21, flowstate::SyntaxTokenKind::Type),
+           "rust str slices should be tokenized as primitive types");
+    Expect(HasSpan(spans, 24, 30, flowstate::SyntaxTokenKind::Keyword),
+           "rust raw identifiers should tokenize by their logical keyword");
 }
 
 void TestPythonHighlighterSpans() {
@@ -1115,7 +1133,9 @@ void TestSquareAndRoundDelimiterHighlighting() {
 void TestRustRenderHighlightsExpandedTokenSet() {
     flowstate::Buffer buffer;
     buffer.setPath("sample.rs");
-    buffer.setText("pub fn render_value(input: i32) -> String {\n"
+    buffer.setText("#[derive(Debug)]\n"
+                   "pub struct Widget<'a> { name: &'a str }\n"
+                   "pub fn render_value(input: i32) -> String {\n"
                    "    println!(\"{}\", 0x2A);\n"
                    "}\n",
                    false);
@@ -1126,6 +1146,10 @@ void TestRustRenderHighlightsExpandedTokenSet() {
 
     Expect(rendered.find("\x1b[38;5;75mpub\x1b[39m") != std::string::npos,
            "rust keywords should render with the keyword color");
+    Expect(ContainsColoredText(rendered, "\x1b[38;5;220m", "derive"),
+           "rust attributes should render with the macro color");
+    Expect(ContainsColoredText(rendered, "\x1b[38;5;81m", "'a"),
+           "rust lifetimes should render with the type color");
     Expect(ContainsColoredText(rendered, "\x1b[38;5;117m", "render_value"),
            "rust function declarations should render with the function color");
     Expect(ContainsColoredText(rendered, "\x1b[38;5;81m", "i32"),
@@ -1844,6 +1868,14 @@ void TestCompletionPrefixAndTriggers() {
     Expect(flowstate::IsCompletionAutoTrigger(go_buffer, {.row = 1, .col = 3}),
            "identifier characters should trigger Go completion while typing");
 
+    flowstate::Buffer rust_buffer;
+    rust_buffer.setPath("sample.rs");
+    rust_buffer.setText("String::new\nvalue", false);
+    Expect(flowstate::IsCompletionAutoTrigger(rust_buffer, {.row = 0, .col = 8}),
+           "scope operator should trigger Rust completion after the second colon");
+    Expect(flowstate::IsCompletionAutoTrigger(rust_buffer, {.row = 1, .col = 5}),
+           "identifier characters should trigger Rust completion while typing");
+
     flowstate::Buffer text_buffer;
     text_buffer.setPath("notes.txt");
     text_buffer.setText("object.", false);
@@ -1871,6 +1903,11 @@ void TestLanguageServerRouting() {
         flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Go);
     Expect(go_server.has_value() && *go_server == flowstate::LanguageServerKind::Go,
            "Go should route to gopls");
+
+    const std::optional<flowstate::LanguageServerKind> rust_server =
+        flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Rust);
+    Expect(rust_server.has_value() && *rust_server == flowstate::LanguageServerKind::Rust,
+           "Rust should route to rust-analyzer");
 
     const std::optional<flowstate::LanguageServerKind> cpp_server =
         flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Cpp);
@@ -1999,6 +2036,24 @@ void TestDiagnosticParsingAndRendering() {
            "file rendering should show a diagnostic bubble when the cursor is on an error");
     Expect(rendered.find("\x1b[48;5;52m\x1b[38;5;231m") != std::string::npos,
            "diagnostic bubble should use a red-accented style");
+
+    flowstate::Buffer go_buffer;
+    go_buffer.setPath("sample.go");
+    go_buffer.setText("http.Handle()", false);
+    flowstate::EditorState go_state(std::move(go_buffer));
+    go_state.fileCursor() = {.row = 0, .col = 0};
+    go_state.setDiagnostics({{
+        .range = {.start = {.row = 0, .col = 0}, .end = {.row = 0, .col = 4}},
+        .severity = flowstate::DiagnosticSeverity::Error,
+        .message = "not enough arguments in call to http.Handle have () want (string, http.Handler)",
+        .source = "compiler",
+    }});
+
+    const std::string long_rendered = screen.Render(go_state, {}, 6, 80);
+    Expect(long_rendered.find("compiler: not enough arguments in call to http.Handle") != std::string::npos,
+           "long diagnostic bubble should render the leading message text");
+    Expect(long_rendered.find("http.Handler)") != std::string::npos,
+           "long diagnostic bubble should wrap instead of dropping the tail");
 }
 
 class FakeLocalAgentClient : public flowstate::ILocalAgentClient {

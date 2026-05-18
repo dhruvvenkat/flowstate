@@ -346,6 +346,44 @@ bool IsFunctionCall(std::string_view line, size_t identifier_end) {
     return next < line.size() && line[next] == '(';
 }
 
+size_t SkipBackwardWhitespace(std::string_view line, size_t index) {
+    while (index > 0 && std::isspace(static_cast<unsigned char>(line[index - 1])) != 0) {
+        --index;
+    }
+    return index;
+}
+
+bool IsAttributeIdentifier(std::string_view line, size_t identifier_start) {
+    size_t cursor = SkipBackwardWhitespace(line, identifier_start);
+    if (cursor == 0 || line[cursor - 1] != '[') {
+        return false;
+    }
+
+    cursor = SkipBackwardWhitespace(line, cursor - 1);
+    if (cursor > 0 && line[cursor - 1] == '!') {
+        cursor = SkipBackwardWhitespace(line, cursor - 1);
+    }
+    return cursor > 0 && line[cursor - 1] == '#';
+}
+
+std::optional<size_t> ScanLifetime(std::string_view line, size_t index) {
+    if (index + 1 >= line.size() || line[index] != '\'') {
+        return std::nullopt;
+    }
+    if (line[index + 1] == '_') {
+        return index + 2;
+    }
+    if (!IsIdentifierStart(line[index + 1])) {
+        return std::nullopt;
+    }
+
+    const size_t end = ScanIdentifierBody(line, index + 1);
+    if (end < line.size() && line[end] == '\'') {
+        return std::nullopt;
+    }
+    return end;
+}
+
 bool SpanEndAt(const std::vector<SyntaxSpan>& spans, size_t index, size_t* end) {
     if (end == nullptr) {
         return false;
@@ -491,6 +529,13 @@ void AppendLexicalSpans(std::string_view line, std::vector<SyntaxSpan>* spans) {
             continue;
         }
 
+        const std::optional<size_t> lifetime_end = ScanLifetime(line, index);
+        if (lifetime_end.has_value()) {
+            AppendSpan(spans, index, *lifetime_end, SyntaxTokenKind::Type);
+            index = *lifetime_end;
+            continue;
+        }
+
         if (IsNumberStart(line, index)) {
             const size_t end = ScanNumberLiteral(line, index);
             AppendSpan(spans, index, end, SyntaxTokenKind::Number);
@@ -501,7 +546,11 @@ void AppendLexicalSpans(std::string_view line, std::vector<SyntaxSpan>* spans) {
         const std::optional<RustIdentifier> identifier = ScanRustIdentifier(line, index);
         if (identifier.has_value()) {
             const std::string_view token = identifier->logical;
-            if (expect_function_name) {
+            if (IsAttributeIdentifier(line, identifier->start)) {
+                AppendSpan(spans, identifier->start, identifier->end, SyntaxTokenKind::Macro);
+                expect_function_name = false;
+                expect_type_name = false;
+            } else if (expect_function_name) {
                 AppendSpan(spans, identifier->start, identifier->end, SyntaxTokenKind::Function);
                 expect_function_name = false;
                 expect_type_name = false;
