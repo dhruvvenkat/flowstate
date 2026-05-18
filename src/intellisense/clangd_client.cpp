@@ -166,6 +166,48 @@ std::optional<ServerDefinition> ResolvePythonServer(std::string* error) {
     return std::nullopt;
 }
 
+std::optional<ServerDefinition> ResolveTypeScriptServer(std::string* error) {
+    const char* configured = std::getenv("FLOWSTATE_TYPESCRIPT_LSP_PATH");
+    if (configured != nullptr && *configured != '\0') {
+        const std::optional<std::filesystem::path> executable = FindExecutable(configured);
+        if (!executable.has_value()) {
+            if (error != nullptr) {
+                *error = "TypeScript language server not found at FLOWSTATE_TYPESCRIPT_LSP_PATH.";
+            }
+            return std::nullopt;
+        }
+        return ServerDefinition{
+            .executable = *executable,
+            .arguments = {"--stdio"},
+            .display_name = FileName(*executable),
+        };
+    }
+
+    if (const std::optional<std::filesystem::path> executable =
+            FindLocalNodeExecutable("typescript-language-server");
+        executable.has_value()) {
+        return ServerDefinition{
+            .executable = *executable,
+            .arguments = {"--stdio"},
+            .display_name = "typescript-language-server",
+        };
+    }
+    if (const std::optional<std::filesystem::path> executable = FindExecutable("typescript-language-server");
+        executable.has_value()) {
+        return ServerDefinition{
+            .executable = *executable,
+            .arguments = {"--stdio"},
+            .display_name = "typescript-language-server",
+        };
+    }
+
+    if (error != nullptr) {
+        *error = "TypeScript language server not found. Run npm install for the project TypeScript IntelliSense "
+                 "dependencies, or set FLOWSTATE_TYPESCRIPT_LSP_PATH.";
+    }
+    return std::nullopt;
+}
+
 std::optional<ServerDefinition> ResolveServer(LanguageServerKind kind, std::string* error) {
     switch (kind) {
         case LanguageServerKind::Clangd: {
@@ -184,6 +226,8 @@ std::optional<ServerDefinition> ResolveServer(LanguageServerKind kind, std::stri
         }
         case LanguageServerKind::Python:
             return ResolvePythonServer(error);
+        case LanguageServerKind::TypeScript:
+            return ResolveTypeScriptServer(error);
     }
     return std::nullopt;
 }
@@ -418,6 +462,10 @@ std::string LanguageIdForBuffer(const Buffer& buffer) {
             return "cpp";
         case LanguageId::Python:
             return "python";
+        case LanguageId::JavaScript:
+            return "javascript";
+        case LanguageId::TypeScript:
+            return "typescript";
         default:
             return "plaintext";
     }
@@ -539,6 +587,7 @@ bool LanguageServerClient::StartServer(LanguageServerKind kind,
     completion_capabilities["completionItem"] = JsonValue(std::move(completion_item));
     JsonValue::Object text_document_capabilities;
     text_document_capabilities["completion"] = JsonValue(std::move(completion_capabilities));
+    text_document_capabilities["publishDiagnostics"] = JsonValue(JsonValue::Object{});
     JsonValue::Object capabilities;
     capabilities["textDocument"] = JsonValue(std::move(text_document_capabilities));
 
@@ -916,7 +965,9 @@ std::filesystem::path ResolveClangdProjectRoot(const Buffer& buffer) {
 }
 
 std::filesystem::path ResolveLanguageServerProjectRoot(const Buffer& buffer) {
-    if (buffer.languageId() == LanguageId::Python) {
+    const LanguageId language_id = buffer.languageId();
+    if (language_id == LanguageId::Python || language_id == LanguageId::JavaScript ||
+        language_id == LanguageId::TypeScript) {
         std::filesystem::path path = AbsolutePathForBuffer(buffer);
         if (!std::filesystem::is_directory(path)) {
             path = path.parent_path();
@@ -924,13 +975,20 @@ std::filesystem::path ResolveLanguageServerProjectRoot(const Buffer& buffer) {
 
         std::filesystem::path current = path;
         while (!current.empty()) {
-            if (std::filesystem::exists(current / "pyproject.toml") ||
-                std::filesystem::exists(current / "setup.cfg") ||
-                std::filesystem::exists(current / "setup.py") ||
-                std::filesystem::exists(current / "requirements.txt") ||
-                std::filesystem::exists(current / "Pipfile") ||
-                std::filesystem::exists(current / "poetry.lock") ||
-                std::filesystem::exists(current / ".git")) {
+            const bool python_root =
+                language_id == LanguageId::Python &&
+                (std::filesystem::exists(current / "pyproject.toml") ||
+                 std::filesystem::exists(current / "setup.cfg") ||
+                 std::filesystem::exists(current / "setup.py") ||
+                 std::filesystem::exists(current / "requirements.txt") ||
+                 std::filesystem::exists(current / "Pipfile") ||
+                 std::filesystem::exists(current / "poetry.lock"));
+            const bool typescript_root =
+                (language_id == LanguageId::JavaScript || language_id == LanguageId::TypeScript) &&
+                (std::filesystem::exists(current / "tsconfig.json") ||
+                 std::filesystem::exists(current / "jsconfig.json") ||
+                 std::filesystem::exists(current / "package.json"));
+            if (python_root || typescript_root || std::filesystem::exists(current / ".git")) {
                 return current;
             }
             const std::filesystem::path parent = current.parent_path();
@@ -951,6 +1009,9 @@ std::optional<LanguageServerKind> LanguageServerKindForLanguage(LanguageId langu
     }
     if (language_id == LanguageId::Python) {
         return LanguageServerKind::Python;
+    }
+    if (language_id == LanguageId::JavaScript || language_id == LanguageId::TypeScript) {
+        return LanguageServerKind::TypeScript;
     }
     return std::nullopt;
 }

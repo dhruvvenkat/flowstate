@@ -39,7 +39,8 @@ bool IsCppCompletionLanguage(LanguageId language_id) {
 }
 
 bool IsCompletionLanguage(LanguageId language_id) {
-    return IsCppCompletionLanguage(language_id) || language_id == LanguageId::Python;
+    return IsCppCompletionLanguage(language_id) || language_id == LanguageId::Python ||
+           language_id == LanguageId::JavaScript || language_id == LanguageId::TypeScript;
 }
 
 Cursor CompletionPrefixStart(const Buffer& buffer, Cursor cursor) {

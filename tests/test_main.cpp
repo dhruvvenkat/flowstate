@@ -1820,6 +1820,22 @@ void TestCompletionPrefixAndTriggers() {
     Expect(flowstate::IsCompletionAutoTrigger(python_buffer, {.row = 1, .col = 3}),
            "identifier characters should trigger Python completion while typing");
 
+    flowstate::Buffer javascript_buffer;
+    javascript_buffer.setPath("sample.js");
+    javascript_buffer.setText("object.member\nres", false);
+    Expect(flowstate::IsCompletionAutoTrigger(javascript_buffer, {.row = 0, .col = 7}),
+           "dot should trigger JavaScript completion");
+    Expect(flowstate::IsCompletionAutoTrigger(javascript_buffer, {.row = 1, .col = 3}),
+           "identifier characters should trigger JavaScript completion while typing");
+
+    flowstate::Buffer typescript_buffer;
+    typescript_buffer.setPath("sample.ts");
+    typescript_buffer.setText("object.member\nres", false);
+    Expect(flowstate::IsCompletionAutoTrigger(typescript_buffer, {.row = 0, .col = 7}),
+           "dot should trigger TypeScript completion");
+    Expect(flowstate::IsCompletionAutoTrigger(typescript_buffer, {.row = 1, .col = 3}),
+           "identifier characters should trigger TypeScript completion while typing");
+
     flowstate::Buffer text_buffer;
     text_buffer.setPath("notes.txt");
     text_buffer.setText("object.", false);
@@ -1832,6 +1848,16 @@ void TestLanguageServerRouting() {
         flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Python);
     Expect(python_server.has_value() && *python_server == flowstate::LanguageServerKind::Python,
            "Python should route to the Python language server");
+
+    const std::optional<flowstate::LanguageServerKind> javascript_server =
+        flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::JavaScript);
+    Expect(javascript_server.has_value() && *javascript_server == flowstate::LanguageServerKind::TypeScript,
+           "JavaScript should route to the TypeScript language server");
+
+    const std::optional<flowstate::LanguageServerKind> typescript_server =
+        flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::TypeScript);
+    Expect(typescript_server.has_value() && *typescript_server == flowstate::LanguageServerKind::TypeScript,
+           "TypeScript should route to the TypeScript language server");
 
     const std::optional<flowstate::LanguageServerKind> cpp_server =
         flowstate::LanguageServerKindForLanguage(flowstate::LanguageId::Cpp);

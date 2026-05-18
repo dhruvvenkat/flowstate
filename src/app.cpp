@@ -1815,7 +1815,7 @@ void EditorApp::RequestCompletion(bool automatic) {
     if (!IsCompletionLanguage(state_.fileBuffer().languageId())) {
         state_.clearDiagnostics();
         if (!automatic) {
-            state_.setStatus("IntelliSense is only enabled for C/C++ and Python right now.");
+            state_.setStatus("IntelliSense is only enabled for C/C++, Python, JavaScript, and TypeScript right now.");
         }
         return;
     }
