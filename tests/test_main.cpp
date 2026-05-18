@@ -1896,10 +1896,33 @@ void TestApplyCompletionItem() {
     Expect(buffer.text() == "int main() { co_return }", "completion textEdit should replace its explicit range");
 }
 
+void TestCompletionFiltering() {
+    std::vector<flowstate::CompletionItem> items = {
+        flowstate::CompletionItem{.label = "AbortController"},
+        flowstate::CompletionItem{.label = "console"},
+        flowstate::CompletionItem{.label = "confirm"},
+        flowstate::CompletionItem{.label = "TextDecoder"},
+    };
+
+    std::vector<flowstate::CompletionItem> filtered =
+        flowstate::FilterAndRankCompletionItems(std::move(items), "cons");
+    Expect(filtered.size() == 1 && filtered[0].label == "console",
+           "completion filtering should narrow prefix matches as the user types");
+
+    std::vector<flowstate::CompletionItem> filter_text_items = {
+        flowstate::CompletionItem{.label = "AbortController"},
+        flowstate::CompletionItem{.label = "log", .filter_text = "console"},
+    };
+    filtered = flowstate::FilterAndRankCompletionItems(std::move(filter_text_items), "con");
+    Expect(filtered.size() == 1 && filtered[0].label == "log",
+           "completion filtering should use LSP filterText when provided");
+}
+
 void TestCompletionParsing() {
     const std::string payload =
         "{\"items\":["
-        "{\"label\":\"push_back\",\"detail\":\"void vector::push_back(int)\",\"insertText\":\"push_back\"},"
+        "{\"label\":\"push_back\",\"detail\":\"void vector::push_back(int)\",\"insertText\":\"push_back\","
+        "\"filterText\":\"push_back\",\"sortText\":\"1\"},"
         "{\"label\":\"snippet\",\"insertText\":\"snippet(${1:x})\",\"insertTextFormat\":2},"
         "{\"label\":\"size\",\"textEdit\":{\"range\":{\"start\":{\"line\":3,\"character\":4},"
         "\"end\":{\"line\":3,\"character\":8}},\"newText\":\"size\"}}]}";
@@ -1911,6 +1934,8 @@ void TestCompletionParsing() {
     Expect(items.size() == 3, "completion parser should read CompletionList items");
     Expect(items[0].label == "push_back" && items[0].detail.find("vector") != std::string::npos,
            "completion parser should preserve label and detail");
+    Expect(items[0].filter_text == "push_back" && items[0].sort_text == "1",
+           "completion parser should preserve filterText and sortText");
     Expect(items[1].insert_text == "snippet", "snippet completions should fall back to plain labels");
     Expect(items[2].text_edit.has_value() && items[2].text_edit->start.row == 3 &&
                items[2].text_edit->start.col == 4,
@@ -2158,6 +2183,7 @@ int main() {
         TestCompletionPrefixAndTriggers();
         TestLanguageServerRouting();
         TestApplyCompletionItem();
+        TestCompletionFiltering();
         TestCompletionParsing();
         TestDiagnosticParsingAndRendering();
         TestCodexClientIgnoresInitialIdleBeforeFirstTurn();

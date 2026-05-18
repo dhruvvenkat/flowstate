@@ -1786,7 +1786,9 @@ void EditorApp::PollCompletionRequest() {
             return;
         }
 
-        session.items = event.items;
+        const std::string prefix =
+            CompletionPrefixText(state_.fileBuffer(), session.replace_start, session.replace_end);
+        session.items = FilterAndRankCompletionItems(event.items, prefix);
         session.selected = 0;
         if (session.items.empty()) {
             state_.clearCompletionSession();

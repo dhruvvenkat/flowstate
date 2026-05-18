@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "buffer.h"
@@ -18,6 +19,8 @@ struct CompletionItem {
     std::string label;
     std::string detail;
     std::string insert_text;
+    std::string filter_text;
+    std::string sort_text;
     std::optional<CompletionTextEdit> text_edit;
 };
 
@@ -35,6 +38,9 @@ struct CompletionSession {
 bool IsCppCompletionLanguage(LanguageId language_id);
 bool IsCompletionLanguage(LanguageId language_id);
 Cursor CompletionPrefixStart(const Buffer& buffer, Cursor cursor);
+std::string CompletionPrefixText(const Buffer& buffer, Cursor start, Cursor end);
+std::vector<CompletionItem> FilterAndRankCompletionItems(std::vector<CompletionItem> items,
+                                                         std::string_view prefix);
 bool IsCompletionAutoTrigger(const Buffer& buffer, Cursor cursor);
 bool ApplyCompletionItem(Buffer& buffer,
                          Cursor& cursor,

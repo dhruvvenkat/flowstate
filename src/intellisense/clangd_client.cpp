@@ -361,6 +361,8 @@ std::vector<CompletionItem> ParseCompletionItems(const JsonValue& result) {
         CompletionItem item;
         item.label = label;
         item.detail = StringField(value, "detail");
+        item.filter_text = StringField(value, "filterText");
+        item.sort_text = StringField(value, "sortText");
         item.insert_text = snippet_format ? label : StringField(value, "insertText");
         if (item.insert_text.empty()) {
             item.insert_text = label;

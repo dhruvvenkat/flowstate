@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 
 namespace flowstate {
 
@@ -10,6 +11,55 @@ namespace {
 bool IsIdentifierCharacter(char ch) {
     const unsigned char value = static_cast<unsigned char>(ch);
     return std::isalnum(value) != 0 || ch == '_';
+}
+
+std::string Lowercase(std::string_view text) {
+    std::string lowered;
+    lowered.reserve(text.size());
+    for (char ch : text) {
+        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    return lowered;
+}
+
+bool StartsWith(std::string_view text, std::string_view prefix) {
+    return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+}
+
+std::string MatchTextForItem(const CompletionItem& item) {
+    if (!item.filter_text.empty()) {
+        return item.filter_text;
+    }
+    if (!item.insert_text.empty()) {
+        return item.insert_text;
+    }
+    return item.label;
+}
+
+int CompletionMatchScore(const CompletionItem& item,
+                         std::string_view prefix,
+                         std::string_view lowered_prefix) {
+    if (prefix.empty()) {
+        return 0;
+    }
+
+    const std::string match_text = MatchTextForItem(item);
+    const std::string lowered_match_text = Lowercase(match_text);
+    const std::string lowered_label = Lowercase(item.label);
+    const std::string lowered_insert_text = Lowercase(item.insert_text);
+
+    if (match_text == prefix || item.label == prefix || item.insert_text == prefix) {
+        return 0;
+    }
+    if (StartsWith(match_text, prefix) || StartsWith(item.label, prefix) ||
+        (!item.insert_text.empty() && StartsWith(item.insert_text, prefix))) {
+        return 1;
+    }
+    if (StartsWith(lowered_match_text, lowered_prefix) || StartsWith(lowered_label, lowered_prefix) ||
+        (!lowered_insert_text.empty() && StartsWith(lowered_insert_text, lowered_prefix))) {
+        return 2;
+    }
+    return std::numeric_limits<int>::max();
 }
 
 bool IsValidRange(const Buffer& buffer, const Cursor& start, const Cursor& end) {
@@ -56,6 +106,71 @@ Cursor CompletionPrefixStart(const Buffer& buffer, Cursor cursor) {
         --start_col;
     }
     return Cursor{cursor.row, start_col};
+}
+
+std::string CompletionPrefixText(const Buffer& buffer, Cursor start, Cursor end) {
+    if (start.row != end.row || start.row >= buffer.lineCount()) {
+        return {};
+    }
+
+    const std::string& line = buffer.line(start.row);
+    start.col = std::min(start.col, line.size());
+    end.col = std::min(end.col, line.size());
+    if (start.col > end.col) {
+        return {};
+    }
+    return line.substr(start.col, end.col - start.col);
+}
+
+std::vector<CompletionItem> FilterAndRankCompletionItems(std::vector<CompletionItem> items,
+                                                         std::string_view prefix) {
+    if (prefix.empty() || items.size() <= 1) {
+        return items;
+    }
+
+    const std::string lowered_prefix = Lowercase(prefix);
+    struct RankedItem {
+        CompletionItem item;
+        int score = 0;
+        size_t original_index = 0;
+    };
+
+    std::vector<RankedItem> ranked;
+    ranked.reserve(items.size());
+    for (size_t index = 0; index < items.size(); ++index) {
+        const int score = CompletionMatchScore(items[index], prefix, lowered_prefix);
+        if (score == std::numeric_limits<int>::max()) {
+            continue;
+        }
+        ranked.push_back({.item = std::move(items[index]), .score = score, .original_index = index});
+    }
+
+    if (ranked.empty()) {
+        return items;
+    }
+
+    std::stable_sort(ranked.begin(), ranked.end(), [](const RankedItem& left, const RankedItem& right) {
+        if (left.score != right.score) {
+            return left.score < right.score;
+        }
+        if (left.item.sort_text != right.item.sort_text) {
+            if (left.item.sort_text.empty()) {
+                return false;
+            }
+            if (right.item.sort_text.empty()) {
+                return true;
+            }
+            return left.item.sort_text < right.item.sort_text;
+        }
+        return left.original_index < right.original_index;
+    });
+
+    std::vector<CompletionItem> filtered;
+    filtered.reserve(ranked.size());
+    for (RankedItem& item : ranked) {
+        filtered.push_back(std::move(item.item));
+    }
+    return filtered;
 }
 
 bool IsCompletionAutoTrigger(const Buffer& buffer, Cursor cursor) {
