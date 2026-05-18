@@ -40,6 +40,14 @@ class EditorAppTestPeer {
     static bool HandleInlineAiKey(EditorApp& app, const KeyPress& key) {
         return app.HandleInlineAiKey(key);
     }
+
+    static bool HandleCompletionKey(EditorApp& app, const KeyPress& key) {
+        return app.HandleCompletionKey(key);
+    }
+
+    static bool IsCompletionDismissedForPrefix(EditorApp& app, Cursor replace_start) {
+        return app.IsCompletionDismissedForPrefix(replace_start);
+    }
 };
 
 }  // namespace flowstate
@@ -1946,6 +1954,34 @@ void TestApplyCompletionItem() {
     Expect(buffer.text() == "int main() { co_return }", "completion textEdit should replace its explicit range");
 }
 
+void TestEscapeDismissesCompletionPopup() {
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.cpp");
+    buffer.setText("cons", false);
+
+    auto ai_client = std::make_unique<flowstate::NoAiClient>();
+    flowstate::EditorApp app(std::move(buffer), std::move(ai_client), "", "NO AI", "c++17");
+    flowstate::EditorState& state = flowstate::EditorAppTestPeer::State(app);
+    state.setCompletionSession({
+        .active = true,
+        .waiting = false,
+        .request_id = 7,
+        .replace_start = {.row = 0, .col = 0},
+        .replace_end = {.row = 0, .col = 4},
+        .items = {flowstate::CompletionItem{.label = "console"}},
+    });
+
+    const bool handled = flowstate::EditorAppTestPeer::HandleCompletionKey(
+        app, flowstate::KeyPress{.type = flowstate::KeyType::Escape});
+
+    Expect(handled, "escape should be handled by an active completion popup");
+    Expect(!state.completionSession().active, "escape should close the completion popup");
+    Expect(flowstate::EditorAppTestPeer::IsCompletionDismissedForPrefix(app, {.row = 0, .col = 0}),
+           "escape should suppress automatic completion for the dismissed prefix");
+    Expect(!flowstate::EditorAppTestPeer::IsCompletionDismissedForPrefix(app, {.row = 0, .col = 1}),
+           "escape suppression should not apply to a different prefix");
+}
+
 void TestCompletionFiltering() {
     std::vector<flowstate::CompletionItem> items = {
         flowstate::CompletionItem{.label = "AbortController"},
@@ -2251,6 +2287,7 @@ int main() {
         TestCompletionPrefixAndTriggers();
         TestLanguageServerRouting();
         TestApplyCompletionItem();
+        TestEscapeDismissesCompletionPopup();
         TestCompletionFiltering();
         TestCompletionParsing();
         TestDiagnosticParsingAndRendering();

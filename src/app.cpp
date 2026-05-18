@@ -1043,6 +1043,7 @@ bool EditorApp::OpenFile(const std::string& path) {
     language_server_document_synced_ = false;
     diagnostics_auto_suppressed_ = false;
     completion_auto_suppressed_ = false;
+    dismissed_completion_prefix_.reset();
     state_.setStatus("Opened " + path + ".");
     return true;
 }
@@ -1806,6 +1807,7 @@ void EditorApp::RequestCompletion(bool automatic) {
     }
     if (!automatic) {
         completion_auto_suppressed_ = false;
+        dismissed_completion_prefix_.reset();
     }
 
     if (state_.activeView() != ViewKind::File) {
@@ -1825,6 +1827,9 @@ void EditorApp::RequestCompletion(bool automatic) {
     Cursor cursor = state_.fileCursor();
     CursorController::clamp(cursor, state_.fileBuffer());
     const Cursor replace_start = CompletionPrefixStart(state_.fileBuffer(), cursor);
+    if (automatic && IsCompletionDismissedForPrefix(replace_start)) {
+        return;
+    }
 
     std::string error;
     if (!language_server_client_.Start(state_.fileBuffer(), &error)) {
@@ -1877,6 +1882,20 @@ void EditorApp::RequestCompletion(bool automatic) {
 
 void EditorApp::CloseCompletion() { state_.clearCompletionSession(); }
 
+void EditorApp::DismissCompletion() {
+    const CompletionSession session = state_.completionSession();
+    if (session.active) {
+        dismissed_completion_prefix_ = session.replace_start;
+    }
+    CloseCompletion();
+}
+
+bool EditorApp::IsCompletionDismissedForPrefix(Cursor replace_start) const {
+    return dismissed_completion_prefix_.has_value() &&
+           dismissed_completion_prefix_->row == replace_start.row &&
+           dismissed_completion_prefix_->col == replace_start.col;
+}
+
 bool EditorApp::HandleCompletionKey(const KeyPress& key) {
     CompletionSession session = state_.completionSession();
     if (!session.active) {
@@ -1885,8 +1904,7 @@ bool EditorApp::HandleCompletionKey(const KeyPress& key) {
 
     switch (key.type) {
         case KeyType::Escape:
-            CloseCompletion();
-            state_.setStatus("Completion cancelled.");
+            DismissCompletion();
             return true;
         case KeyType::ArrowUp:
             if (!session.items.empty() && session.selected > 0) {

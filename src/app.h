@@ -74,6 +74,8 @@ class EditorApp {
     void PollCompletionRequest();
     void RequestCompletion(bool automatic);
     void CloseCompletion();
+    void DismissCompletion();
+    bool IsCompletionDismissedForPrefix(Cursor replace_start) const;
     bool HandleCompletionKey(const KeyPress& key);
     void AcceptCompletion();
     void EnsureRealtimeDiagnostics();
@@ -107,6 +109,7 @@ class EditorApp {
     bool completion_auto_suppressed_ = false;
     bool diagnostics_auto_suppressed_ = false;
     bool language_server_document_synced_ = false;
+    std::optional<Cursor> dismissed_completion_prefix_;
     bool running_ = true;
     bool command_mode_ = false;
     std::string command_input_;
