@@ -23,6 +23,7 @@ struct Diagnostic {
     DiagnosticRange range;
     DiagnosticSeverity severity = DiagnosticSeverity::Error;
     std::string message;
+    std::string source;
 };
 
 bool HasErrorDiagnosticAt(const std::vector<Diagnostic>& diagnostics, size_t row, size_t col);

@@ -1812,11 +1812,19 @@ void TestCompletionPrefixAndTriggers() {
     Expect(flowstate::IsCompletionAutoTrigger(buffer, {.row = 2, .col = 5}),
            "scope operator should trigger C++ completion after the second colon");
 
+    flowstate::Buffer python_buffer;
+    python_buffer.setPath("sample.py");
+    python_buffer.setText("self.value\nres", false);
+    Expect(flowstate::IsCompletionAutoTrigger(python_buffer, {.row = 0, .col = 5}),
+           "dot should trigger Python completion");
+    Expect(flowstate::IsCompletionAutoTrigger(python_buffer, {.row = 1, .col = 3}),
+           "identifier characters should trigger Python completion while typing");
+
     flowstate::Buffer text_buffer;
     text_buffer.setPath("notes.txt");
     text_buffer.setText("object.", false);
     Expect(!flowstate::IsCompletionAutoTrigger(text_buffer, {.row = 0, .col = 7}),
-           "non-C++ files should not auto-trigger IntelliSense");
+           "unsupported files should not auto-trigger IntelliSense");
 }
 
 void TestApplyCompletionItem() {
@@ -1872,7 +1880,7 @@ void TestDiagnosticParsingAndRendering() {
     const std::string payload =
         "{\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":4},"
         "\"end\":{\"line\":0,\"character\":8}},\"severity\":1,"
-        "\"message\":\"expected ';'\"}]}";
+        "\"message\":\"expected ';'\",\"source\":\"clangd\"}]}";
     std::string error;
     const std::optional<flowstate::JsonValue> json = flowstate::JsonValue::Parse(payload, &error);
     Expect(json.has_value(), "diagnostic fixture should parse as JSON");
@@ -1882,6 +1890,7 @@ void TestDiagnosticParsingAndRendering() {
     Expect(diagnostics[0].range.start.row == 0 && diagnostics[0].range.start.col == 4,
            "diagnostic parser should preserve start positions");
     Expect(diagnostics[0].message == "expected ';'", "diagnostic parser should preserve messages");
+    Expect(diagnostics[0].source == "clangd", "diagnostic parser should preserve sources");
     Expect(flowstate::HasErrorDiagnosticAt(diagnostics, 0, 4),
            "error diagnostics should cover their range start");
     Expect(flowstate::ErrorDiagnosticAt(diagnostics, 0, 4) != nullptr &&

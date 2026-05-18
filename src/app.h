@@ -103,10 +103,10 @@ class EditorApp {
     Screen screen_;
     EditorState state_;
     std::unique_ptr<IAiClient> ai_client_;
-    ClangdClient clangd_client_;
+    LanguageServerClient language_server_client_;
     bool completion_auto_suppressed_ = false;
     bool diagnostics_auto_suppressed_ = false;
-    bool clangd_document_synced_ = false;
+    bool language_server_document_synced_ = false;
     bool running_ = true;
     bool command_mode_ = false;
     std::string command_input_;

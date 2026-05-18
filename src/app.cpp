@@ -231,7 +231,7 @@ EditorApp::EditorApp(Buffer file_buffer,
                      std::string cpp_standard)
     : state_(std::move(file_buffer)),
       ai_client_(std::move(ai_client)),
-      clangd_client_(std::move(cpp_standard)) {
+      language_server_client_(std::move(cpp_standard)) {
     state_.setBuildCommand(std::move(build_command));
     state_.setAiProviderName(std::move(ai_provider_name));
     state_.setStatus("Alt+C commands, Ctrl+F finds, Shift+Arrow selects, Ctrl+/ comments, Ctrl+C copies.");
@@ -1040,7 +1040,7 @@ bool EditorApp::OpenFile(const std::string& path) {
     state_.setFileBuffer(std::move(buffer));
     state_.clearCompletionSession();
     state_.clearDiagnostics();
-    clangd_document_synced_ = false;
+    language_server_document_synced_ = false;
     diagnostics_auto_suppressed_ = false;
     completion_auto_suppressed_ = false;
     state_.setStatus("Opened " + path + ".");
@@ -1761,7 +1761,7 @@ void EditorApp::PollAiRequest() {
 }
 
 void EditorApp::PollCompletionRequest() {
-    for (const CompletionEvent& event : clangd_client_.PollEvents()) {
+    for (const CompletionEvent& event : language_server_client_.PollEvents()) {
         if (event.kind == CompletionEventKind::Diagnostics) {
             state_.setDiagnostics(event.diagnostics);
             continue;
@@ -1812,10 +1812,10 @@ void EditorApp::RequestCompletion(bool automatic) {
         }
         return;
     }
-    if (!IsCppCompletionLanguage(state_.fileBuffer().languageId())) {
+    if (!IsCompletionLanguage(state_.fileBuffer().languageId())) {
         state_.clearDiagnostics();
         if (!automatic) {
-            state_.setStatus("IntelliSense is only enabled for C++ right now.");
+            state_.setStatus("IntelliSense is only enabled for C/C++ and Python right now.");
         }
         return;
     }
@@ -1825,32 +1825,32 @@ void EditorApp::RequestCompletion(bool automatic) {
     const Cursor replace_start = CompletionPrefixStart(state_.fileBuffer(), cursor);
 
     std::string error;
-    if (!clangd_client_.Start(ResolveClangdProjectRoot(state_.fileBuffer()), &error)) {
+    if (!language_server_client_.Start(state_.fileBuffer(), &error)) {
         state_.clearCompletionSession();
         state_.clearDiagnostics();
-        clangd_document_synced_ = false;
+        language_server_document_synced_ = false;
         if (automatic) {
             completion_auto_suppressed_ = true;
             diagnostics_auto_suppressed_ = true;
         }
-        state_.setStatus(error.empty() ? "Unable to start clangd." : error, 10);
+        state_.setStatus(error.empty() ? "Unable to start language server." : error, 10);
         return;
     }
-    if (!clangd_client_.SyncDocument(state_.fileBuffer(), &error)) {
+    if (!language_server_client_.SyncDocument(state_.fileBuffer(), &error)) {
         state_.clearCompletionSession();
         state_.clearDiagnostics();
-        clangd_document_synced_ = false;
+        language_server_document_synced_ = false;
         if (automatic) {
             completion_auto_suppressed_ = true;
             diagnostics_auto_suppressed_ = true;
         }
-        state_.setStatus(error.empty() ? "Unable to sync file with clangd." : error, 10);
+        state_.setStatus(error.empty() ? "Unable to sync file with language server." : error, 10);
         return;
     }
-    clangd_document_synced_ = true;
+    language_server_document_synced_ = true;
     diagnostics_auto_suppressed_ = false;
 
-    const std::optional<int> request_id = clangd_client_.RequestCompletion(state_.fileBuffer(), cursor, &error);
+    const std::optional<int> request_id = language_server_client_.RequestCompletion(state_.fileBuffer(), cursor, &error);
     if (!request_id.has_value()) {
         state_.clearCompletionSession();
         if (automatic) {
@@ -1869,7 +1869,7 @@ void EditorApp::RequestCompletion(bool automatic) {
         .message = "Completing...",
     });
     if (!automatic) {
-        state_.setStatus("Completing with clangd...", 3);
+        state_.setStatus("Completing with " + language_server_client_.displayName() + "...", 3);
     }
 }
 
@@ -1956,43 +1956,43 @@ void EditorApp::AcceptCompletion() {
 }
 
 void EditorApp::EnsureRealtimeDiagnostics() {
-    if (state_.activeView() != ViewKind::File || !IsCppCompletionLanguage(state_.fileBuffer().languageId())) {
+    if (state_.activeView() != ViewKind::File || !IsCompletionLanguage(state_.fileBuffer().languageId())) {
         state_.clearDiagnostics();
-        clangd_document_synced_ = false;
+        language_server_document_synced_ = false;
         return;
     }
-    if (clangd_document_synced_ || diagnostics_auto_suppressed_) {
+    if (language_server_document_synced_ || diagnostics_auto_suppressed_) {
         return;
     }
 
     std::string error;
-    if (!clangd_client_.Start(ResolveClangdProjectRoot(state_.fileBuffer()), &error)) {
+    if (!language_server_client_.Start(state_.fileBuffer(), &error)) {
         state_.clearDiagnostics();
         diagnostics_auto_suppressed_ = true;
         return;
     }
-    if (!clangd_client_.SyncDocument(state_.fileBuffer(), &error)) {
+    if (!language_server_client_.SyncDocument(state_.fileBuffer(), &error)) {
         state_.clearDiagnostics();
         diagnostics_auto_suppressed_ = true;
         return;
     }
 
-    clangd_document_synced_ = true;
+    language_server_document_synced_ = true;
 }
 
 void EditorApp::NotifyCompletionDocumentChanged() {
-    clangd_document_synced_ = false;
-    if (!IsCppCompletionLanguage(state_.fileBuffer().languageId())) {
+    language_server_document_synced_ = false;
+    if (!IsCompletionLanguage(state_.fileBuffer().languageId())) {
         state_.clearDiagnostics();
         return;
     }
     diagnostics_auto_suppressed_ = false;
-    if (!clangd_client_.IsStarted()) {
+    if (!language_server_client_.IsStartedFor(state_.fileBuffer().languageId())) {
         return;
     }
     std::string error;
-    if (clangd_client_.SyncDocument(state_.fileBuffer(), &error)) {
-        clangd_document_synced_ = true;
+    if (language_server_client_.SyncDocument(state_.fileBuffer(), &error)) {
+        language_server_document_synced_ = true;
     } else {
         state_.clearDiagnostics();
         diagnostics_auto_suppressed_ = true;
@@ -2212,7 +2212,7 @@ void EditorApp::InvalidatePatchSessionForManualFileEdit() {
 
 void EditorApp::QuitEditor() {
     ai_client_->Shutdown();
-    clangd_client_.Shutdown();
+    language_server_client_.Shutdown();
     active_ai_request_.reset();
     ai_request_backgrounded_ = false;
     state_.clearAiRequestState();

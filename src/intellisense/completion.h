@@ -33,6 +33,7 @@ struct CompletionSession {
 };
 
 bool IsCppCompletionLanguage(LanguageId language_id);
+bool IsCompletionLanguage(LanguageId language_id);
 Cursor CompletionPrefixStart(const Buffer& buffer, Cursor cursor);
 bool IsCompletionAutoTrigger(const Buffer& buffer, Cursor cursor);
 bool ApplyCompletionItem(Buffer& buffer,

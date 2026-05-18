@@ -85,7 +85,7 @@ export FLOWSTATE_AI_MODE=codex
 | `Alt+R` | Reject the current hunk in patch preview |
 | `Alt+C` | Enter command mode |
 | `Alt+D` | Toggle previous-line peek when the cursor is on a blue or red Git gutter marker |
-| `Alt+I` | Request C++ IntelliSense completions with clangd |
+| `Alt+I` | Request IntelliSense completions for C/C++ or Python |
 
 Notes:
 
@@ -95,17 +95,18 @@ Notes:
 - In the file picker, type to filter, use arrow keys to select, press `Enter` to open, or `Esc` to cancel.
 - Cut, copy, and paste currently use an internal flowstate clipboard rather than the system clipboard.
 
-## c++ intelliSense
+## intelliSense
 
-flowstate can request C/C++/header completions from `clangd`.
+flowstate can request C/C++/header completions from `clangd` and Python completions from a Python language server.
 
 Requirements:
 
 - `clangd` must be installed and available on `PATH`, or `FLOWSTATE_CLANGD_PATH` must point to it.
+- Python IntelliSense needs `pyright-langserver` or `pylsp` on `PATH`, or `FLOWSTATE_PYTHON_LSP_PATH` must point to one of them.
 - Project-aware completions work best when CMake writes `compile_commands.json`.
 - `--cpp-standard <standard>` or `FLOWSTATE_CPP_STANDARD=<standard>` sets clangd fallback parsing for C++ files without compile commands.
 
-Completions open automatically while typing C++ identifiers and after `.`, `->`, and `::`. `Alt+I` can still request completions manually. Use arrow keys to select, `Enter` or `Tab` to accept, and `Esc` to cancel.
+Completions open automatically while typing supported identifiers and after `.`, plus C++ `->` and `::`. `Alt+I` can still request completions manually. Use arrow keys to select, `Enter` or `Tab` to accept, and `Esc` to cancel.
 
 ## command mode
 

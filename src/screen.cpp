@@ -1394,7 +1394,8 @@ void RenderDiagnosticBubble(std::ostringstream& output,
         return;
     }
 
-    std::string text = "clangd: " + diagnostic->message;
+    const std::string source = diagnostic->source.empty() ? "LSP" : diagnostic->source;
+    std::string text = source + ": " + diagnostic->message;
     for (char& ch : text) {
         if (ch == '\n' || ch == '\r' || ch == '\t' || static_cast<unsigned char>(ch) < 32) {
             ch = ' ';

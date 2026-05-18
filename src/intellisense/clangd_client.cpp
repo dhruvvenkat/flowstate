@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
 
 namespace flowstate {
 
@@ -60,6 +61,83 @@ std::optional<std::filesystem::path> ResolveClangdExecutable() {
         return FindExecutable(configured);
     }
     return FindExecutable("clangd");
+}
+
+struct ServerDefinition {
+    std::filesystem::path executable;
+    std::vector<std::string> arguments;
+    std::string display_name;
+};
+
+std::string FileName(const std::filesystem::path& path) {
+    const std::string filename = path.filename().string();
+    return filename.empty() ? path.string() : filename;
+}
+
+bool UsesPyrightStdio(const std::filesystem::path& executable) {
+    const std::string filename = FileName(executable);
+    return filename.find("pyright") != std::string::npos;
+}
+
+std::optional<ServerDefinition> ResolvePythonServer(std::string* error) {
+    const char* configured = std::getenv("FLOWSTATE_PYTHON_LSP_PATH");
+    if (configured != nullptr && *configured != '\0') {
+        const std::optional<std::filesystem::path> executable = FindExecutable(configured);
+        if (!executable.has_value()) {
+            if (error != nullptr) {
+                *error = "Python language server not found at FLOWSTATE_PYTHON_LSP_PATH.";
+            }
+            return std::nullopt;
+        }
+        ServerDefinition server{.executable = *executable, .display_name = FileName(*executable)};
+        if (UsesPyrightStdio(*executable)) {
+            server.arguments.push_back("--stdio");
+        }
+        return server;
+    }
+
+    if (const std::optional<std::filesystem::path> executable = FindExecutable("pyright-langserver");
+        executable.has_value()) {
+        return ServerDefinition{
+            .executable = *executable,
+            .arguments = {"--stdio"},
+            .display_name = "pyright-langserver",
+        };
+    }
+    if (const std::optional<std::filesystem::path> executable = FindExecutable("pylsp"); executable.has_value()) {
+        return ServerDefinition{
+            .executable = *executable,
+            .display_name = "pylsp",
+        };
+    }
+
+    if (error != nullptr) {
+        *error = "Python language server not found. Install pyright-langserver or pylsp, or set "
+                 "FLOWSTATE_PYTHON_LSP_PATH.";
+    }
+    return std::nullopt;
+}
+
+std::optional<ServerDefinition> ResolveServer(LanguageServerKind kind, std::string* error) {
+    switch (kind) {
+        case LanguageServerKind::Clangd: {
+            const std::optional<std::filesystem::path> executable = ResolveClangdExecutable();
+            if (!executable.has_value()) {
+                if (error != nullptr) {
+                    *error = "clangd not found. Install clangd or set FLOWSTATE_CLANGD_PATH.";
+                }
+                return std::nullopt;
+            }
+            return ServerDefinition{
+                .executable = *executable,
+                .arguments = {"--log=error"},
+                .display_name = "clangd",
+            };
+        }
+        case LanguageServerKind::Python:
+            return ResolvePythonServer(error);
+    }
+    return std::nullopt;
 }
 
 JsonValue::Object TextDocumentIdentifier(const std::string& uri) {
@@ -229,6 +307,7 @@ std::vector<Diagnostic> ParseDiagnostics(const JsonValue& params) {
             .range = *range,
             .severity = DiagnosticSeverityFromLsp(IntField(value, "severity", 1)),
             .message = StringField(value, "message"),
+            .source = StringField(value, "source"),
         });
     }
     return diagnostics;
@@ -289,6 +368,8 @@ std::string LanguageIdForBuffer(const Buffer& buffer) {
         case LanguageId::CHeader:
         case LanguageId::Cpp:
             return "cpp";
+        case LanguageId::Python:
+            return "python";
         default:
             return "plaintext";
     }
@@ -313,29 +394,46 @@ std::string StandardFlag(std::string standard) {
 
 }  // namespace
 
-ClangdClient::ClangdClient(std::string cpp_standard) : cpp_standard_(std::move(cpp_standard)) {}
+LanguageServerClient::LanguageServerClient(std::string cpp_standard) : cpp_standard_(std::move(cpp_standard)) {}
 
-ClangdClient::~ClangdClient() { Shutdown(); }
+LanguageServerClient::~LanguageServerClient() { Shutdown(); }
 
-bool ClangdClient::Start(const std::filesystem::path& project_root, std::string* error) {
+bool LanguageServerClient::Start(const Buffer& buffer, std::string* error) {
+    const std::optional<LanguageServerKind> kind = LanguageServerKindForLanguage(buffer.languageId());
+    if (!kind.has_value()) {
+        if (error != nullptr) {
+            *error = "IntelliSense is not enabled for " + std::string(LanguageDisplayName(buffer.languageId())) + ".";
+        }
+        return false;
+    }
+    if (IsStarted() && active_kind_.has_value() && *active_kind_ == *kind) {
+        return true;
+    }
+    if (IsStarted()) {
+        Shutdown();
+    }
+    return StartServer(*kind, ResolveLanguageServerProjectRoot(buffer), error);
+}
+
+bool LanguageServerClient::StartServer(LanguageServerKind kind,
+                                       const std::filesystem::path& project_root,
+                                       std::string* error) {
     if (IsStarted()) {
         return true;
     }
     ::signal(SIGPIPE, SIG_IGN);
 
-    const std::optional<std::filesystem::path> executable = ResolveClangdExecutable();
-    if (!executable.has_value()) {
-        if (error != nullptr) {
-            *error = "clangd not found. Install clangd or set FLOWSTATE_CLANGD_PATH.";
-        }
+    const std::optional<ServerDefinition> server = ResolveServer(kind, error);
+    if (!server.has_value()) {
         return false;
     }
+    display_name_ = server->display_name;
 
     int stdin_pipe[2] = {-1, -1};
     int stdout_pipe[2] = {-1, -1};
     if (::pipe(stdin_pipe) == -1 || ::pipe(stdout_pipe) == -1) {
         if (error != nullptr) {
-            *error = std::string("Unable to create clangd pipes: ") + std::strerror(errno);
+            *error = std::string("Unable to create ") + display_name_ + " pipes: " + std::strerror(errno);
         }
         return false;
     }
@@ -343,7 +441,7 @@ bool ClangdClient::Start(const std::filesystem::path& project_root, std::string*
     const pid_t child = ::fork();
     if (child == -1) {
         if (error != nullptr) {
-            *error = std::string("Unable to start clangd: ") + std::strerror(errno);
+            *error = std::string("Unable to start ") + display_name_ + ": " + std::strerror(errno);
         }
         ::close(stdin_pipe[0]);
         ::close(stdin_pipe[1]);
@@ -366,7 +464,13 @@ bool ClangdClient::Start(const std::filesystem::path& project_root, std::string*
         if (!project_root.empty()) {
             ::chdir(project_root.c_str());
         }
-        ::execl(executable->c_str(), executable->c_str(), "--log=error", nullptr);
+        std::vector<char*> argv;
+        argv.push_back(const_cast<char*>(server->executable.c_str()));
+        for (const std::string& argument : server->arguments) {
+            argv.push_back(const_cast<char*>(argument.c_str()));
+        }
+        argv.push_back(nullptr);
+        ::execv(server->executable.c_str(), argv.data());
         _exit(127);
     }
 
@@ -375,19 +479,32 @@ bool ClangdClient::Start(const std::filesystem::path& project_root, std::string*
     input_fd_ = stdin_pipe[1];
     output_fd_ = stdout_pipe[0];
     child_pid_ = static_cast<int>(child);
+    active_kind_ = kind;
     const int flags = ::fcntl(output_fd_, F_GETFL, 0);
     if (flags >= 0) {
         ::fcntl(output_fd_, F_SETFL, flags | O_NONBLOCK);
     }
 
+    JsonValue::Object completion_item;
+    completion_item["snippetSupport"] = JsonValue(false);
+    JsonValue::Object completion_capabilities;
+    completion_capabilities["completionItem"] = JsonValue(std::move(completion_item));
+    JsonValue::Object text_document_capabilities;
+    text_document_capabilities["completion"] = JsonValue(std::move(completion_capabilities));
     JsonValue::Object capabilities;
-    capabilities["textDocument"] = JsonValue(JsonValue::Object{});
+    capabilities["textDocument"] = JsonValue(std::move(text_document_capabilities));
 
     JsonValue::Object params;
     params["processId"] = JsonValue(static_cast<int>(::getpid()));
     params["rootUri"] = JsonValue(FileUriFromPath(project_root));
     params["capabilities"] = JsonValue(std::move(capabilities));
-    const std::string standard_flag = StandardFlag(cpp_standard_);
+    JsonValue::Object workspace_folder;
+    workspace_folder["uri"] = JsonValue(FileUriFromPath(project_root));
+    workspace_folder["name"] =
+        JsonValue(project_root.filename().empty() ? project_root.string() : project_root.filename().string());
+    params["workspaceFolders"] = JsonValue(JsonValue::Array{JsonValue(std::move(workspace_folder))});
+
+    const std::string standard_flag = kind == LanguageServerKind::Clangd ? StandardFlag(cpp_standard_) : "";
     if (!standard_flag.empty()) {
         JsonValue::Object initialization_options;
         initialization_options["fallbackFlags"] =
@@ -398,21 +515,29 @@ bool ClangdClient::Start(const std::filesystem::path& project_root, std::string*
     std::string send_error;
     if (!SendRequest(next_request_id_++, "initialize", JsonValue(std::move(params)), &send_error) ||
         !SendNotification("initialized", JsonValue(JsonValue::Object{}), &send_error)) {
+        const std::string server_name = displayName();
         Shutdown();
         if (error != nullptr) {
-            *error = send_error.empty() ? "Unable to initialize clangd." : send_error;
+            *error = send_error.empty() ? "Unable to initialize " + server_name + "." : send_error;
         }
         return false;
     }
     return true;
 }
 
-bool ClangdClient::IsStarted() const { return input_fd_ >= 0 && output_fd_ >= 0 && child_pid_ > 0; }
+bool LanguageServerClient::IsStarted() const { return input_fd_ >= 0 && output_fd_ >= 0 && child_pid_ > 0; }
 
-bool ClangdClient::SyncDocument(const Buffer& buffer, std::string* error) {
+bool LanguageServerClient::IsStartedFor(LanguageId language_id) const {
+    const std::optional<LanguageServerKind> kind = LanguageServerKindForLanguage(language_id);
+    return IsStarted() && active_kind_.has_value() && kind.has_value() && *active_kind_ == *kind;
+}
+
+std::string LanguageServerClient::displayName() const { return display_name_.empty() ? "language server" : display_name_; }
+
+bool LanguageServerClient::SyncDocument(const Buffer& buffer, std::string* error) {
     if (!IsStarted()) {
         if (error != nullptr) {
-            *error = "clangd is not running.";
+            *error = displayName() + " is not running.";
         }
         return false;
     }
@@ -428,10 +553,10 @@ bool ClangdClient::SyncDocument(const Buffer& buffer, std::string* error) {
     return SendDidChange(buffer, uri, error);
 }
 
-std::optional<int> ClangdClient::RequestCompletion(const Buffer& buffer, Cursor cursor, std::string* error) {
+std::optional<int> LanguageServerClient::RequestCompletion(const Buffer& buffer, Cursor cursor, std::string* error) {
     if (!IsStarted()) {
         if (error != nullptr) {
-            *error = "clangd is not running.";
+            *error = displayName() + " is not running.";
         }
         return std::nullopt;
     }
@@ -452,7 +577,7 @@ std::optional<int> ClangdClient::RequestCompletion(const Buffer& buffer, Cursor 
     return request_id;
 }
 
-std::vector<CompletionEvent> ClangdClient::PollEvents() {
+std::vector<CompletionEvent> LanguageServerClient::PollEvents() {
     CheckProcessExit();
     ReadAvailableMessages();
     std::vector<CompletionEvent> events;
@@ -464,7 +589,7 @@ std::vector<CompletionEvent> ClangdClient::PollEvents() {
     return events;
 }
 
-void ClangdClient::Shutdown() {
+void LanguageServerClient::Shutdown() {
     if (IsStarted()) {
         std::string ignored;
         SendNotification("exit", JsonValue(JsonValue::Object{}), &ignored);
@@ -484,25 +609,27 @@ void ClangdClient::Shutdown() {
             ::kill(child_pid_, SIGKILL);
             ::waitpid(child_pid_, nullptr, 0);
         }
-        child_pid_ = -1;
     }
+    child_pid_ = -1;
+    active_kind_.reset();
+    display_name_.clear();
     current_uri_.clear();
     read_buffer_.clear();
     queued_events_.clear();
 }
 
-bool ClangdClient::SendMessage(const std::string& json, std::string* error) {
+bool LanguageServerClient::SendMessage(const std::string& json, std::string* error) {
     const std::string framed = HeaderForBody(json) + json;
     if (!WriteAll(input_fd_, framed)) {
         if (error != nullptr) {
-            *error = std::string("Unable to write to clangd: ") + std::strerror(errno);
+            *error = std::string("Unable to write to ") + displayName() + ": " + std::strerror(errno);
         }
         return false;
     }
     return true;
 }
 
-bool ClangdClient::SendRequest(int id, const std::string& method, JsonValue params, std::string* error) {
+bool LanguageServerClient::SendRequest(int id, const std::string& method, JsonValue params, std::string* error) {
     JsonValue::Object message;
     message["jsonrpc"] = JsonValue("2.0");
     message["id"] = JsonValue(id);
@@ -511,7 +638,15 @@ bool ClangdClient::SendRequest(int id, const std::string& method, JsonValue para
     return SendMessage(JsonValue(std::move(message)).Serialize(), error);
 }
 
-bool ClangdClient::SendNotification(const std::string& method, JsonValue params, std::string* error) {
+bool LanguageServerClient::SendResponse(int id, JsonValue result, std::string* error) {
+    JsonValue::Object message;
+    message["jsonrpc"] = JsonValue("2.0");
+    message["id"] = JsonValue(id);
+    message["result"] = std::move(result);
+    return SendMessage(JsonValue(std::move(message)).Serialize(), error);
+}
+
+bool LanguageServerClient::SendNotification(const std::string& method, JsonValue params, std::string* error) {
     JsonValue::Object message;
     message["jsonrpc"] = JsonValue("2.0");
     message["method"] = JsonValue(method);
@@ -519,7 +654,7 @@ bool ClangdClient::SendNotification(const std::string& method, JsonValue params,
     return SendMessage(JsonValue(std::move(message)).Serialize(), error);
 }
 
-void ClangdClient::ReadAvailableMessages() {
+void LanguageServerClient::ReadAvailableMessages() {
     if (output_fd_ < 0) {
         return;
     }
@@ -565,7 +700,7 @@ void ClangdClient::ReadAvailableMessages() {
     }
 }
 
-void ClangdClient::HandleMessage(const JsonValue& message) {
+void LanguageServerClient::HandleMessage(const JsonValue& message) {
     const JsonValue* id = message.find("id");
     if (id == nullptr || !id->isNumber()) {
         HandleNotification(message);
@@ -573,10 +708,16 @@ void ClangdClient::HandleMessage(const JsonValue& message) {
     }
 
     const int request_id = id->intValue();
+    const JsonValue* method = message.find("method");
+    if (method != nullptr && method->isString()) {
+        HandleServerRequest(request_id, message);
+        return;
+    }
+
     if (const JsonValue* error = message.find("error"); error != nullptr) {
         queued_events_.push_back({.kind = CompletionEventKind::Error,
                                   .request_id = request_id,
-                                  .error_message = "clangd completion request failed."});
+                                  .error_message = displayName() + " completion request failed."});
         return;
     }
 
@@ -586,7 +727,24 @@ void ClangdClient::HandleMessage(const JsonValue& message) {
     }
 }
 
-void ClangdClient::HandleNotification(const JsonValue& message) {
+void LanguageServerClient::HandleServerRequest(int request_id, const JsonValue& message) {
+    JsonValue result;
+    const JsonValue* method = message.find("method");
+    if (method != nullptr && method->isString() && method->stringValue() == "workspace/configuration") {
+        JsonValue::Array settings;
+        const JsonValue* params = message.find("params");
+        const JsonValue* items = params == nullptr ? nullptr : params->find("items");
+        if (items != nullptr && items->isArray()) {
+            settings.resize(items->arrayValue().size());
+        }
+        result = JsonValue(std::move(settings));
+    }
+
+    std::string ignored;
+    SendResponse(request_id, std::move(result), &ignored);
+}
+
+void LanguageServerClient::HandleNotification(const JsonValue& message) {
     const JsonValue* method = message.find("method");
     if (method == nullptr || !method->isString()) {
         return;
@@ -599,14 +757,20 @@ void ClangdClient::HandleNotification(const JsonValue& message) {
     }
 }
 
-void ClangdClient::HandlePublishDiagnostics(const JsonValue& params) {
+void LanguageServerClient::HandlePublishDiagnostics(const JsonValue& params) {
+    std::vector<Diagnostic> diagnostics = ParseDiagnostics(params);
+    for (Diagnostic& diagnostic : diagnostics) {
+        if (diagnostic.source.empty()) {
+            diagnostic.source = displayName();
+        }
+    }
     queued_events_.push_back({
         .kind = CompletionEventKind::Diagnostics,
-        .diagnostics = ParseDiagnostics(params),
+        .diagnostics = std::move(diagnostics),
     });
 }
 
-void ClangdClient::HandleCompletionResponse(int request_id, const JsonValue& result) {
+void LanguageServerClient::HandleCompletionResponse(int request_id, const JsonValue& result) {
     queued_events_.push_back({
         .kind = CompletionEventKind::Completed,
         .request_id = request_id,
@@ -614,7 +778,7 @@ void ClangdClient::HandleCompletionResponse(int request_id, const JsonValue& res
     });
 }
 
-void ClangdClient::CheckProcessExit() {
+void LanguageServerClient::CheckProcessExit() {
     if (child_pid_ <= 0) {
         return;
     }
@@ -633,15 +797,18 @@ void ClangdClient::CheckProcessExit() {
         ::close(output_fd_);
         output_fd_ = -1;
     }
+    const std::string server_name = displayName();
     child_pid_ = -1;
+    active_kind_.reset();
+    display_name_.clear();
     current_uri_.clear();
     read_buffer_.clear();
     queued_events_.push_back({.kind = CompletionEventKind::Error,
                               .request_id = 0,
-                              .error_message = "clangd exited before completing the request."});
+                              .error_message = server_name + " exited before completing the request."});
 }
 
-bool ClangdClient::SendDidOpen(const Buffer& buffer, const std::string& uri, std::string* error) {
+bool LanguageServerClient::SendDidOpen(const Buffer& buffer, const std::string& uri, std::string* error) {
     JsonValue::Object text_document;
     text_document["uri"] = JsonValue(uri);
     text_document["languageId"] = JsonValue(LanguageIdForBuffer(buffer));
@@ -653,7 +820,7 @@ bool ClangdClient::SendDidOpen(const Buffer& buffer, const std::string& uri, std
     return SendNotification("textDocument/didOpen", JsonValue(std::move(params)), error);
 }
 
-bool ClangdClient::SendDidChange(const Buffer& buffer, const std::string& uri, std::string* error) {
+bool LanguageServerClient::SendDidChange(const Buffer& buffer, const std::string& uri, std::string* error) {
     JsonValue::Object text_document;
     text_document["uri"] = JsonValue(uri);
     text_document["version"] = JsonValue(document_version_);
@@ -667,7 +834,7 @@ bool ClangdClient::SendDidChange(const Buffer& buffer, const std::string& uri, s
     return SendNotification("textDocument/didChange", JsonValue(std::move(params)), error);
 }
 
-void ClangdClient::SendDidClose() {
+void LanguageServerClient::SendDidClose() {
     if (current_uri_.empty() || !IsStarted()) {
         return;
     }
@@ -698,6 +865,46 @@ std::filesystem::path ResolveClangdProjectRoot(const Buffer& buffer) {
         current = parent;
     }
     return path.empty() ? std::filesystem::current_path() : path;
+}
+
+std::filesystem::path ResolveLanguageServerProjectRoot(const Buffer& buffer) {
+    if (buffer.languageId() == LanguageId::Python) {
+        std::filesystem::path path = AbsolutePathForBuffer(buffer);
+        if (!std::filesystem::is_directory(path)) {
+            path = path.parent_path();
+        }
+
+        std::filesystem::path current = path;
+        while (!current.empty()) {
+            if (std::filesystem::exists(current / "pyproject.toml") ||
+                std::filesystem::exists(current / "setup.cfg") ||
+                std::filesystem::exists(current / "setup.py") ||
+                std::filesystem::exists(current / "requirements.txt") ||
+                std::filesystem::exists(current / "Pipfile") ||
+                std::filesystem::exists(current / "poetry.lock") ||
+                std::filesystem::exists(current / ".git")) {
+                return current;
+            }
+            const std::filesystem::path parent = current.parent_path();
+            if (parent == current) {
+                break;
+            }
+            current = parent;
+        }
+        return path.empty() ? std::filesystem::current_path() : path;
+    }
+
+    return ResolveClangdProjectRoot(buffer);
+}
+
+std::optional<LanguageServerKind> LanguageServerKindForLanguage(LanguageId language_id) {
+    if (IsCppCompletionLanguage(language_id)) {
+        return LanguageServerKind::Clangd;
+    }
+    if (language_id == LanguageId::Python) {
+        return LanguageServerKind::Python;
+    }
+    return std::nullopt;
 }
 
 std::string FileUriFromPath(const std::filesystem::path& path) {

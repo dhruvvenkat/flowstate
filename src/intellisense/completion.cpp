@@ -38,6 +38,10 @@ bool IsCppCompletionLanguage(LanguageId language_id) {
     return language_id == LanguageId::C || language_id == LanguageId::CHeader || language_id == LanguageId::Cpp;
 }
 
+bool IsCompletionLanguage(LanguageId language_id) {
+    return IsCppCompletionLanguage(language_id) || language_id == LanguageId::Python;
+}
+
 Cursor CompletionPrefixStart(const Buffer& buffer, Cursor cursor) {
     if (buffer.lineCount() == 0) {
         return {};
@@ -54,7 +58,8 @@ Cursor CompletionPrefixStart(const Buffer& buffer, Cursor cursor) {
 }
 
 bool IsCompletionAutoTrigger(const Buffer& buffer, Cursor cursor) {
-    if (!IsCppCompletionLanguage(buffer.languageId()) || cursor.row >= buffer.lineCount()) {
+    const LanguageId language_id = buffer.languageId();
+    if (!IsCompletionLanguage(language_id) || cursor.row >= buffer.lineCount()) {
         return false;
     }
 
@@ -69,6 +74,9 @@ bool IsCompletionAutoTrigger(const Buffer& buffer, Cursor cursor) {
     }
     if (previous == '.') {
         return true;
+    }
+    if (!IsCppCompletionLanguage(language_id)) {
+        return false;
     }
     if (previous == '>' && cursor.col >= 2 && line[cursor.col - 2] == '-') {
         return true;
