@@ -2043,6 +2043,31 @@ void TestTabIndentsSelectedLines() {
     Expect(state.selection().active, "block unindent should keep the selection active");
 }
 
+void TestTerminalPastePreservesMultilineIndentation() {
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.py");
+    buffer.setText("", false);
+
+    auto ai_client = std::make_unique<flowstate::NoAiClient>();
+    flowstate::EditorApp app(std::move(buffer), std::move(ai_client), "", "NO AI", "c++17");
+    flowstate::EditorState& state = flowstate::EditorAppTestPeer::State(app);
+
+    const std::string pasted = "def outer():\r\n"
+                               "    if ready:\r\n"
+                               "        print('ok')\r\n"
+                               "    return True\r\n";
+    flowstate::EditorAppTestPeer::HandleNormalKey(
+        app, flowstate::KeyPress{.type = flowstate::KeyType::Paste, .text = pasted});
+
+    Expect(state.fileBuffer().text() == "def outer():\n"
+                                        "    if ready:\n"
+                                        "        print('ok')\n"
+                                        "    return True\n",
+           "terminal paste should insert the pasted block literally without auto-indent stair-stepping");
+    Expect(state.fileCursor().row == 4 && state.fileCursor().col == 0,
+           "terminal paste cursor should land at the end of the pasted block");
+}
+
 void TestCompletionFiltering() {
     std::vector<flowstate::CompletionItem> items = {
         flowstate::CompletionItem{.label = "AbortController"},
@@ -2351,6 +2376,7 @@ int main() {
         TestApplyCompletionItem();
         TestEscapeDismissesCompletionPopup();
         TestTabIndentsSelectedLines();
+        TestTerminalPastePreservesMultilineIndentation();
         TestCompletionFiltering();
         TestCompletionParsing();
         TestDiagnosticParsingAndRendering();

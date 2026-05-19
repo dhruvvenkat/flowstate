@@ -66,6 +66,7 @@ class EditorApp {
     bool IndentSelectedLines(bool outdent);
     bool UnindentCurrentLine();
     void InsertCharacter(char ch);
+    void InsertPastedText(const std::string& text);
     void UndoFileEdit();
     void RedoFileEdit();
     void RunBuild();

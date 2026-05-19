@@ -6,8 +6,10 @@
 #include <cstring>
 #include <poll.h>
 #include <string>
+#include <string_view>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <utility>
 #include <unistd.h>
 
 namespace flowstate {
@@ -177,7 +179,8 @@ KeyPress ControlSequenceKey(std::string_view sequence) {
 
 void RestoreTerminalMode() {
     if (g_raw_mode_enabled && g_original_mode != nullptr) {
-        ::write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1000l", 16);
+        constexpr std::string_view kDisableTerminalFeatures = "\x1b[?2004l\x1b[?1006l\x1b[?1000l";
+        ::write(STDOUT_FILENO, kDisableTerminalFeatures.data(), kDisableTerminalFeatures.size());
         tcsetattr(STDIN_FILENO, TCSAFLUSH, g_original_mode);
         g_raw_mode_enabled = false;
     }
@@ -246,7 +249,8 @@ bool Terminal::EnableRawMode(std::string* error) {
     raw_mode_enabled_ = true;
     g_original_mode = original_mode_;
     g_raw_mode_enabled = true;
-    ::write(STDOUT_FILENO, "\x1b[?1000h\x1b[?1006h", 16);
+    constexpr std::string_view kEnableTerminalFeatures = "\x1b[?1000h\x1b[?1006h\x1b[?2004h";
+    ::write(STDOUT_FILENO, kEnableTerminalFeatures.data(), kEnableTerminalFeatures.size());
     InstallSignalHandlers();
     return true;
 }
@@ -318,6 +322,25 @@ KeyPress Terminal::ReadKey() const {
                 sequence.push_back(next);
                 if (next >= '@' && next <= '~') {
                     break;
+                }
+            }
+            if (sequence == "200~") {
+                std::string text;
+                std::string suffix;
+                while (true) {
+                    char next = '\0';
+                    if (!read_optional_byte(&next, 100)) {
+                        return {.type = KeyType::Paste, .text = std::move(text)};
+                    }
+                    text.push_back(next);
+                    suffix.push_back(next);
+                    if (suffix.size() > 6) {
+                        suffix.erase(suffix.begin());
+                    }
+                    if (suffix == "\x1b[201~") {
+                        text.resize(text.size() - suffix.size());
+                        return {.type = KeyType::Paste, .text = std::move(text)};
+                    }
                 }
             }
             return ControlSequenceKey(sequence);

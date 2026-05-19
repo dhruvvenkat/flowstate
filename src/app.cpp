@@ -45,6 +45,22 @@ bool IsAutoclosedPair(char open, char close) {
     return expected_close.has_value() && *expected_close == close;
 }
 
+std::string NormalizePastedText(const std::string& text) {
+    std::string normalized;
+    normalized.reserve(text.size());
+    for (size_t index = 0; index < text.size(); ++index) {
+        if (text[index] == '\r') {
+            if (index + 1 < text.size() && text[index + 1] == '\n') {
+                ++index;
+            }
+            normalized.push_back('\n');
+        } else {
+            normalized.push_back(text[index]);
+        }
+    }
+    return normalized;
+}
+
 std::string JoinRange(const Buffer& buffer, size_t start, size_t end) {
     if (buffer.lineCount() == 0 || start >= buffer.lineCount() || start > end) {
         return {};
@@ -573,6 +589,11 @@ void EditorApp::HandleNormalKey(const KeyPress& key) {
                     NotifyCompletionDocumentChanged();
                     InvalidatePatchSessionForManualFileEdit();
                 }
+            }
+            return;
+        case KeyType::Paste:
+            if (state_.activeView() == ViewKind::File) {
+                InsertPastedText(key.text);
             }
             return;
         case KeyType::Character:
@@ -1576,6 +1597,32 @@ void EditorApp::InsertCharacter(char ch) {
     }
 }
 
+void EditorApp::InsertPastedText(const std::string& text) {
+    if (text.empty()) {
+        return;
+    }
+    if (state_.fileBuffer().readOnly()) {
+        state_.setStatus("Buffer is read-only.");
+        return;
+    }
+
+    Cursor& cursor = state_.fileCursor();
+    const std::string normalized = NormalizePastedText(text);
+    state_.BeginFileEdit();
+    if (HasSelection(state_.selection())) {
+        const SelectionRange range = NormalizeSelection(state_.selection());
+        state_.fileBuffer().replaceRange(cursor, range.start, range.end, normalized);
+    } else {
+        state_.fileBuffer().insertText(cursor, normalized);
+    }
+    state_.clearSelection();
+    CursorController::clamp(cursor, state_.fileBuffer());
+    if (state_.CommitFileEdit()) {
+        NotifyCompletionDocumentChanged();
+        InvalidatePatchSessionForManualFileEdit();
+    }
+}
+
 void EditorApp::UndoFileEdit() {
     if (state_.activeView() != ViewKind::File && state_.activeView() != ViewKind::PatchPreview) {
         state_.setStatus("Undo only works on the file buffer.");
@@ -2014,9 +2061,12 @@ bool EditorApp::HandleCompletionKey(const KeyPress& key) {
         case KeyType::PageDown:
         case KeyType::ArrowLeft:
         case KeyType::ArrowRight:
+        case KeyType::Paste:
             CloseCompletion();
             return false;
         case KeyType::Unknown:
+        case KeyType::MouseWheelUp:
+        case KeyType::MouseWheelDown:
             return false;
     }
     return false;

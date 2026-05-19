@@ -23,6 +23,7 @@ enum class KeyType {
     Enter,
     Escape,
     Backspace,
+    Paste,
     MouseWheelUp,
     MouseWheelDown,
 };
@@ -33,6 +34,7 @@ struct KeyPress {
     bool ctrl = false;
     bool alt = false;
     bool shift = false;
+    std::string text;
 };
 
 class Terminal {
