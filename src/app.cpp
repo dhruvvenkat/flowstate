@@ -74,6 +74,26 @@ size_t SelectionEndRow(const EditorState& state) {
     return state.fileCursor().row;
 }
 
+bool CursorWithinRows(const Cursor& cursor, size_t start_row, size_t line_count) {
+    return cursor.row >= start_row && cursor.row < start_row + line_count;
+}
+
+void AdjustCursorForLineIndent(Cursor& cursor, size_t start_row, const std::vector<size_t>& deltas, bool outdent) {
+    if (!CursorWithinRows(cursor, start_row, deltas.size())) {
+        return;
+    }
+
+    const size_t delta = deltas[cursor.row - start_row];
+    if (delta == 0) {
+        return;
+    }
+    if (outdent) {
+        cursor.col = cursor.col > delta ? cursor.col - delta : 0;
+    } else {
+        cursor.col += delta;
+    }
+}
+
 std::string AiRequestStateLabel(AiRequestState state) {
     switch (state) {
         case AiRequestState::Connecting:
@@ -528,6 +548,13 @@ void EditorApp::HandleNormalKey(const KeyPress& key) {
             return;
         case KeyType::Tab:
             if (state_.activeView() == ViewKind::File) {
+                if (IndentSelectedLines(key.shift)) {
+                    return;
+                }
+                if (key.shift) {
+                    UnindentCurrentLine();
+                    return;
+                }
                 state_.BeginFileEdit();
                 state_.fileBuffer().insertIndent(state_.fileCursor());
                 UpdateSelectionHead();
@@ -1442,6 +1469,58 @@ bool EditorApp::DeleteAutoclosedPairIfActive() {
 
     state_.BeginFileEdit();
     state_.fileBuffer().deleteRange(cursor, {cursor.row, cursor.col - 1}, {cursor.row, cursor.col + 1});
+    if (state_.CommitFileEdit()) {
+        NotifyCompletionDocumentChanged();
+        InvalidatePatchSessionForManualFileEdit();
+    }
+    return true;
+}
+
+bool EditorApp::IndentSelectedLines(bool outdent) {
+    if (state_.activeView() != ViewKind::File || !HasSelection(state_.selection())) {
+        return false;
+    }
+    if (state_.fileBuffer().readOnly() || state_.fileBuffer().lineCount() == 0) {
+        return true;
+    }
+
+    const SelectionRange range = NormalizeSelection(state_.selection());
+    size_t start_row = std::min(range.start.row, state_.fileBuffer().lineCount() - 1);
+    size_t end_row = std::min(range.end.row, state_.fileBuffer().lineCount() - 1);
+    if (range.end.col == 0 && range.end.row > range.start.row) {
+        end_row = std::min(range.end.row - 1, state_.fileBuffer().lineCount() - 1);
+    }
+    if (end_row < start_row) {
+        return true;
+    }
+
+    state_.BeginFileEdit();
+    const std::vector<size_t> deltas = outdent ? state_.fileBuffer().unindentLines(start_row, end_row)
+                                               : state_.fileBuffer().indentLines(start_row, end_row);
+    AdjustCursorForLineIndent(state_.fileCursor(), start_row, deltas, outdent);
+    AdjustCursorForLineIndent(state_.selection().anchor, start_row, deltas, outdent);
+    AdjustCursorForLineIndent(state_.selection().head, start_row, deltas, outdent);
+    CursorController::clamp(state_.fileCursor(), state_.fileBuffer());
+    CursorController::clamp(state_.selection().anchor, state_.fileBuffer());
+    CursorController::clamp(state_.selection().head, state_.fileBuffer());
+    if (state_.CommitFileEdit()) {
+        NotifyCompletionDocumentChanged();
+        InvalidatePatchSessionForManualFileEdit();
+    }
+    return true;
+}
+
+bool EditorApp::UnindentCurrentLine() {
+    if (state_.activeView() != ViewKind::File || state_.fileBuffer().readOnly() ||
+        state_.fileBuffer().lineCount() == 0) {
+        return false;
+    }
+
+    const size_t row = std::min(state_.fileCursor().row, state_.fileBuffer().lineCount() - 1);
+    state_.BeginFileEdit();
+    const std::vector<size_t> deltas = state_.fileBuffer().unindentLines(row, row);
+    AdjustCursorForLineIndent(state_.fileCursor(), row, deltas, true);
+    CursorController::clamp(state_.fileCursor(), state_.fileBuffer());
     if (state_.CommitFileEdit()) {
         NotifyCompletionDocumentChanged();
         InvalidatePatchSessionForManualFileEdit();

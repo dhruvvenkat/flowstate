@@ -45,6 +45,10 @@ class EditorAppTestPeer {
         return app.HandleCompletionKey(key);
     }
 
+    static void HandleNormalKey(EditorApp& app, const KeyPress& key) {
+        app.HandleNormalKey(key);
+    }
+
     static bool IsCompletionDismissedForPrefix(EditorApp& app, Cursor replace_start) {
         return app.IsCompletionDismissedForPrefix(replace_start);
     }
@@ -262,6 +266,32 @@ void TestInsertIndentUsesTabStops() {
     buffer.insertIndent(cursor);
     Expect(buffer.line(0) == "ab  ", "tab should insert only enough spaces to reach the next stop");
     Expect(cursor.row == 0 && cursor.col == 4, "tab from column two should land on column four");
+}
+
+void TestLineIndentAndUnindentBlocks() {
+    flowstate::Buffer buffer;
+    buffer.setText("alpha\n  beta\n\tgamma\nomega", false);
+
+    const std::vector<size_t> inserted = buffer.indentLines(0, 2);
+    Expect(inserted.size() == 3 && inserted[0] == flowstate::kIndentWidth,
+           "block indent should report one indentation step per affected line");
+    Expect(buffer.text() == "    alpha\n      beta\n    \tgamma\nomega",
+           "block indent should insert one indentation step at each selected line start");
+
+    const std::vector<size_t> removed = buffer.unindentLines(0, 2);
+    Expect(removed.size() == 3 && removed[0] == flowstate::kIndentWidth &&
+               removed[1] == flowstate::kIndentWidth && removed[2] == flowstate::kIndentWidth,
+           "block unindent should report removed indentation per affected line");
+    Expect(buffer.text() == "alpha\n  beta\n\tgamma\nomega",
+           "block unindent should remove one indentation step from each selected line");
+
+    buffer.setText("  alpha\n\tbeta\ngamma", false);
+    const std::vector<size_t> mixed_removed = buffer.unindentLines(0, 2);
+    Expect(mixed_removed.size() == 3 && mixed_removed[0] == 2 && mixed_removed[1] == 1 &&
+               mixed_removed[2] == 0,
+           "block unindent should remove partial spaces, one tab, or nothing per line");
+    Expect(buffer.text() == "alpha\nbeta\ngamma",
+           "block unindent should handle partial indentation and tab indentation");
 }
 
 void TestLineCommentToggle() {
@@ -1982,6 +2012,37 @@ void TestEscapeDismissesCompletionPopup() {
            "escape suppression should not apply to a different prefix");
 }
 
+void TestTabIndentsSelectedLines() {
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.cpp");
+    buffer.setText("alpha\n  beta\n\tgamma\nomega", false);
+
+    auto ai_client = std::make_unique<flowstate::NoAiClient>();
+    flowstate::EditorApp app(std::move(buffer), std::move(ai_client), "", "NO AI", "c++17");
+    flowstate::EditorState& state = flowstate::EditorAppTestPeer::State(app);
+    state.fileCursor() = {.row = 3, .col = 0};
+    state.selection() = flowstate::Selection{
+        .active = true,
+        .anchor = {.row = 0, .col = 0},
+        .head = {.row = 3, .col = 0},
+    };
+
+    flowstate::EditorAppTestPeer::HandleNormalKey(app, flowstate::KeyPress{.type = flowstate::KeyType::Tab});
+
+    Expect(state.fileBuffer().text() == "    alpha\n      beta\n    \tgamma\nomega",
+           "tab with a multi-line selection should indent each selected line");
+    Expect(state.selection().active, "block indent should keep the selection active");
+    Expect(state.fileCursor().row == 3 && state.fileCursor().col == 0,
+           "block indent should preserve an exclusive end cursor on the following line");
+
+    flowstate::EditorAppTestPeer::HandleNormalKey(
+        app, flowstate::KeyPress{.type = flowstate::KeyType::Tab, .shift = true});
+
+    Expect(state.fileBuffer().text() == "alpha\n  beta\n\tgamma\nomega",
+           "shift-tab with a multi-line selection should unindent each selected line");
+    Expect(state.selection().active, "block unindent should keep the selection active");
+}
+
 void TestCompletionFiltering() {
     std::vector<flowstate::CompletionItem> items = {
         flowstate::CompletionItem{.label = "AbortController"},
@@ -2238,6 +2299,7 @@ int main() {
         TestDeleteRangePlacesCursorAtSelectionStart();
         TestIndentedNewlineAndBackspace();
         TestInsertIndentUsesTabStops();
+        TestLineIndentAndUnindentBlocks();
         TestLineCommentToggle();
         TestPairedCharacterInsertion();
         TestEditorStateUndoRedo();
@@ -2288,6 +2350,7 @@ int main() {
         TestLanguageServerRouting();
         TestApplyCompletionItem();
         TestEscapeDismissesCompletionPopup();
+        TestTabIndentsSelectedLines();
         TestCompletionFiltering();
         TestCompletionParsing();
         TestDiagnosticParsingAndRendering();

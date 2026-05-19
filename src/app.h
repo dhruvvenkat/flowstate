@@ -63,6 +63,8 @@ class EditorApp {
     void ToggleGitPreviousLines();
     bool DeleteSelectionIfActive();
     bool DeleteAutoclosedPairIfActive();
+    bool IndentSelectedLines(bool outdent);
+    bool UnindentCurrentLine();
     void InsertCharacter(char ch);
     void UndoFileEdit();
     void RedoFileEdit();

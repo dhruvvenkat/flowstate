@@ -264,6 +264,64 @@ void Buffer::insertIndent(Cursor& cursor) {
     insertText(cursor, std::string(SpacesToNextIndentStop(cursor.col), ' '));
 }
 
+std::vector<size_t> Buffer::indentLines(size_t start_row, size_t end_row) {
+    if (read_only_) {
+        return {};
+    }
+    ensureNonEmpty();
+
+    start_row = std::min(start_row, lines_.size() - 1);
+    end_row = std::min(end_row, lines_.size() - 1);
+    if (end_row < start_row) {
+        std::swap(start_row, end_row);
+    }
+
+    const std::string indentation(kIndentWidth, ' ');
+    std::vector<size_t> inserted(end_row - start_row + 1, kIndentWidth);
+    for (size_t row = start_row; row <= end_row; ++row) {
+        lines_[row].insert(0, indentation);
+    }
+    dirty_ = true;
+    return inserted;
+}
+
+std::vector<size_t> Buffer::unindentLines(size_t start_row, size_t end_row) {
+    if (read_only_) {
+        return {};
+    }
+    ensureNonEmpty();
+
+    start_row = std::min(start_row, lines_.size() - 1);
+    end_row = std::min(end_row, lines_.size() - 1);
+    if (end_row < start_row) {
+        std::swap(start_row, end_row);
+    }
+
+    std::vector<size_t> removed(end_row - start_row + 1, 0);
+    bool changed = false;
+    for (size_t row = start_row; row <= end_row; ++row) {
+        std::string& line = lines_[row];
+        size_t erase_length = 0;
+        if (!line.empty() && line.front() == '\t') {
+            erase_length = 1;
+        } else {
+            while (erase_length < kIndentWidth && erase_length < line.size() && line[erase_length] == ' ') {
+                ++erase_length;
+            }
+        }
+        if (erase_length == 0) {
+            continue;
+        }
+        line.erase(0, erase_length);
+        removed[row - start_row] = erase_length;
+        changed = true;
+    }
+    if (changed) {
+        dirty_ = true;
+    }
+    return removed;
+}
+
 void Buffer::insertText(Cursor& cursor, std::string_view text) {
     if (read_only_ || text.empty()) {
         return;

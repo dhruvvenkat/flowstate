@@ -127,6 +127,8 @@ KeyPress ControlSequenceKey(std::string_view sequence) {
             case 'C':
             case 'D':
                 return ArrowKey(final_byte);
+            case 'Z':
+                return {.type = KeyType::Tab, .shift = true};
             case 'H':
                 return HomeEndKey(final_byte);
             case 'F':

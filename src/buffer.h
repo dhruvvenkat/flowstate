@@ -58,6 +58,8 @@ class Buffer {
 
     void insertChar(const Cursor& position, char ch);
     void insertIndent(Cursor& cursor);
+    std::vector<size_t> indentLines(size_t start_row, size_t end_row);
+    std::vector<size_t> unindentLines(size_t start_row, size_t end_row);
     void insertText(Cursor& cursor, std::string_view text);
     void insertPairedChars(Cursor& cursor, char open, char close);
     void insertNewline(Cursor& cursor);
