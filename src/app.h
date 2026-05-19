@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ai/client.h"
@@ -56,6 +57,7 @@ class EditorApp {
     std::filesystem::path FilePickerRoot() const;
     std::vector<std::string> DiscoverFilePickerFiles() const;
     void SaveFile();
+    void CopyTextToClipboard(std::string text, std::string_view action, std::string_view target);
     void CopySelectionOrLine();
     void CutSelectionOrLine();
     void PasteClipboard();
@@ -66,7 +68,7 @@ class EditorApp {
     bool IndentSelectedLines(bool outdent);
     bool UnindentCurrentLine();
     void InsertCharacter(char ch);
-    void InsertPastedText(const std::string& text);
+    bool InsertPastedText(const std::string& text);
     void UndoFileEdit();
     void RedoFileEdit();
     void RunBuild();

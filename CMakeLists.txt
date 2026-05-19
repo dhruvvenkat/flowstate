@@ -26,6 +26,7 @@ add_library(
   src/patch.cpp
   src/screen.cpp
   src/selection.cpp
+  src/system_clipboard.cpp
   src/syntax/cpp_highlighter.cpp
   src/syntax/go_highlighter.cpp
   src/syntax/javascript_highlighter.cpp

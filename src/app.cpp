@@ -17,6 +17,7 @@
 #include "intellisense/completion.h"
 #include "patch.h"
 #include "selection.h"
+#include "system_clipboard.h"
 
 namespace flowstate {
 
@@ -1302,6 +1303,19 @@ void EditorApp::SaveFile() {
     }
 }
 
+void EditorApp::CopyTextToClipboard(std::string text, std::string_view action, std::string_view target) {
+    state_.setClipboardText(text);
+
+    std::string error;
+    if (WriteSystemClipboard(text, &error)) {
+        state_.setStatus(std::string(action) + " " + std::string(target) + " to clipboard.");
+        return;
+    }
+
+    terminal_.Write(Osc52ClipboardSequence(text));
+    state_.setStatus(std::string(action) + " " + std::string(target) + " to terminal clipboard.");
+}
+
 void EditorApp::CopySelectionOrLine() {
     if (state_.activeView() != ViewKind::File) {
         state_.setStatus("Copy only works in the file buffer.");
@@ -1309,14 +1323,12 @@ void EditorApp::CopySelectionOrLine() {
     }
 
     if (HasSelection(state_.selection())) {
-        state_.setClipboardText(ExtractSelection(state_.fileBuffer(), state_.selection()));
-        state_.setStatus("Copied selection.");
+        CopyTextToClipboard(ExtractSelection(state_.fileBuffer(), state_.selection()), "Copied", "selection");
         return;
     }
 
     const SelectionRange range = CurrentLineRange(state_.fileBuffer(), state_.fileCursor());
-    state_.setClipboardText(ExtractRange(state_.fileBuffer(), range));
-    state_.setStatus("Copied line.");
+    CopyTextToClipboard(ExtractRange(state_.fileBuffer(), range), "Copied", "line");
 }
 
 void EditorApp::CutSelectionOrLine() {
@@ -1333,19 +1345,18 @@ void EditorApp::CutSelectionOrLine() {
     state_.BeginFileEdit();
     if (HasSelection(state_.selection())) {
         const SelectionRange range = NormalizeSelection(state_.selection());
-        state_.setClipboardText(ExtractRange(state_.fileBuffer(), range));
+        CopyTextToClipboard(ExtractRange(state_.fileBuffer(), range), "Cut", "selection");
         state_.fileBuffer().deleteRange(cursor, range.start, range.end);
         state_.clearSelection();
         if (state_.CommitFileEdit()) {
             NotifyCompletionDocumentChanged();
             InvalidatePatchSessionForManualFileEdit();
-            state_.setStatus("Cut selection.");
         }
         return;
     }
 
     const SelectionRange range = CurrentLineRange(state_.fileBuffer(), cursor);
-    state_.setClipboardText(ExtractRange(state_.fileBuffer(), range));
+    CopyTextToClipboard(ExtractRange(state_.fileBuffer(), range), "Cut", "line");
     state_.fileBuffer().deleteRange(cursor, range.start, range.end);
     cursor.col = 0;
     CursorController::clamp(cursor, state_.fileBuffer());
@@ -1353,7 +1364,6 @@ void EditorApp::CutSelectionOrLine() {
     if (state_.CommitFileEdit()) {
         NotifyCompletionDocumentChanged();
         InvalidatePatchSessionForManualFileEdit();
-        state_.setStatus("Cut line.");
     }
 }
 
@@ -1366,25 +1376,30 @@ void EditorApp::PasteClipboard() {
         state_.setStatus("Buffer is read-only.");
         return;
     }
-    if (!state_.hasClipboardText()) {
-        state_.setStatus("Clipboard is empty.");
+
+    std::string error;
+    if (const std::optional<std::string> system_clipboard = ReadSystemClipboard(&error);
+        system_clipboard.has_value()) {
+        if (system_clipboard->empty()) {
+            state_.setStatus("Clipboard is empty.");
+            return;
+        }
+        if (InsertPastedText(*system_clipboard)) {
+            state_.setStatus("Pasted clipboard.");
+        }
         return;
     }
 
-    Cursor& cursor = state_.fileCursor();
-    state_.BeginFileEdit();
-    if (HasSelection(state_.selection())) {
-        const SelectionRange range = NormalizeSelection(state_.selection());
-        state_.fileBuffer().replaceRange(cursor, range.start, range.end, state_.clipboardText());
-    } else {
-        state_.fileBuffer().insertText(cursor, state_.clipboardText());
+    if (!state_.hasClipboardText()) {
+        state_.setStatus("System clipboard unavailable.");
+        return;
     }
-
-    state_.clearSelection();
-    CursorController::clamp(cursor, state_.fileBuffer());
-    if (state_.CommitFileEdit()) {
-        NotifyCompletionDocumentChanged();
-        InvalidatePatchSessionForManualFileEdit();
+    const std::string internal_clipboard(state_.clipboardText());
+    if (internal_clipboard.empty()) {
+        state_.setStatus("Clipboard is empty.");
+        return;
+    }
+    if (InsertPastedText(internal_clipboard)) {
         state_.setStatus("Pasted clipboard.");
     }
 }
@@ -1597,13 +1612,13 @@ void EditorApp::InsertCharacter(char ch) {
     }
 }
 
-void EditorApp::InsertPastedText(const std::string& text) {
+bool EditorApp::InsertPastedText(const std::string& text) {
     if (text.empty()) {
-        return;
+        return false;
     }
     if (state_.fileBuffer().readOnly()) {
         state_.setStatus("Buffer is read-only.");
-        return;
+        return false;
     }
 
     Cursor& cursor = state_.fileCursor();
@@ -1620,7 +1635,9 @@ void EditorApp::InsertPastedText(const std::string& text) {
     if (state_.CommitFileEdit()) {
         NotifyCompletionDocumentChanged();
         InvalidatePatchSessionForManualFileEdit();
+        return true;
     }
+    return false;
 }
 
 void EditorApp::UndoFileEdit() {

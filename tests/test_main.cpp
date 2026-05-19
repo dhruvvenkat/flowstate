@@ -1,8 +1,10 @@
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -87,6 +89,13 @@ void WriteFixtureFile(const std::filesystem::path& path, const std::string& byte
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     output.close();
     Expect(output.good(), "fixture file should be written");
+}
+
+std::string ReadFixtureFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    return contents.str();
 }
 
 void TestLoadFileRejectsUnreadableContent() {
@@ -2068,6 +2077,47 @@ void TestTerminalPastePreservesMultilineIndentation() {
            "terminal paste cursor should land at the end of the pasted block");
 }
 
+void TestSystemClipboardCopyAndPaste() {
+    const std::filesystem::path clipboard_path =
+        std::filesystem::temp_directory_path() / "flowstate_clipboard_fixture.txt";
+    setenv("FLOWSTATE_CLIPBOARD_FILE", clipboard_path.c_str(), 1);
+
+    flowstate::Buffer buffer;
+    buffer.setPath("sample.txt");
+    buffer.setText("alpha\nbeta", false);
+
+    auto ai_client = std::make_unique<flowstate::NoAiClient>();
+    flowstate::EditorApp app(std::move(buffer), std::move(ai_client), "", "NO AI", "c++17");
+    flowstate::EditorState& state = flowstate::EditorAppTestPeer::State(app);
+    state.selection() = flowstate::Selection{
+        .active = true,
+        .anchor = {.row = 0, .col = 0},
+        .head = {.row = 0, .col = 5},
+    };
+
+    flowstate::EditorAppTestPeer::HandleNormalKey(
+        app, flowstate::KeyPress{.type = flowstate::KeyType::Character, .ch = 'c', .ctrl = true});
+
+    Expect(ReadFixtureFile(clipboard_path) == "alpha",
+           "copy should write selected text to the system clipboard backend");
+    Expect(state.hasClipboardText() && state.clipboardText() == "alpha",
+           "copy should keep the internal clipboard fallback");
+
+    WriteFixtureFile(clipboard_path, "outside\nclipboard");
+    state.fileBuffer().setText("", false);
+    state.fileCursor() = {};
+    state.clearSelection();
+
+    flowstate::EditorAppTestPeer::HandleNormalKey(
+        app, flowstate::KeyPress{.type = flowstate::KeyType::Character, .ch = 'v', .ctrl = true});
+
+    Expect(state.fileBuffer().text() == "outside\nclipboard",
+           "paste should prefer text from the system clipboard backend");
+
+    unsetenv("FLOWSTATE_CLIPBOARD_FILE");
+    std::filesystem::remove(clipboard_path);
+}
+
 void TestCompletionFiltering() {
     std::vector<flowstate::CompletionItem> items = {
         flowstate::CompletionItem{.label = "AbortController"},
@@ -2377,6 +2427,7 @@ int main() {
         TestEscapeDismissesCompletionPopup();
         TestTabIndentsSelectedLines();
         TestTerminalPastePreservesMultilineIndentation();
+        TestSystemClipboardCopyAndPaste();
         TestCompletionFiltering();
         TestCompletionParsing();
         TestDiagnosticParsingAndRendering();
